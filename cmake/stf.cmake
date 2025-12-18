@@ -6,6 +6,5 @@ include(CPM)
 CPMAddPackage(
     NAME stf
     GITHUB_REPOSITORY adobe-research/space-time-functions
-    GIT_TAG 1e16987a3dfa23b9c90728f6f942cfb25a6505a5
+    GIT_TAG 2c641bd5a15db28cfead3eaa0f5f3421e6b3ea8b
 )
-

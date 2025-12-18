@@ -7,6 +7,8 @@
 #include "io.h"
 #include <sweep/logger.h>
 
+#include <queue>
+
 
 void convert_4d_grid_col(
     mtet::MTetMesh grid,

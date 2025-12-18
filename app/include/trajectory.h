@@ -60,7 +60,7 @@ void trajBezier(double t, Eigen::RowVector3d& xt, Eigen::RowVector3d& vt)
 
 void trajLineRot3D(double t, Eigen::Matrix3d& Rt, Eigen::Matrix3d& VRt, const int rotNum)
 {
-    const Scalar pi = 3.14159;
+    const Scalar pi = std::numbers::pi;
     // Compute sine and cosine of theta
     double cosTheta = std::cos(t * rotNum * pi);
     double sinTheta = std::sin(t * rotNum * pi);
@@ -74,7 +74,7 @@ void trajLineRot3D(double t, Eigen::Matrix3d& Rt, Eigen::Matrix3d& VRt, const in
 
 void trajLineRot3Dx(double t, Eigen::Matrix3d& Rt, Eigen::Matrix3d& VRt, const int rotNum)
 {
-    const Scalar pi = 3.14159;
+    const Scalar pi = std::numbers::pi;
     // Compute sine and cosine of theta
     double cosTheta = std::cos(t * rotNum * pi);
     double sinTheta = std::sin(t * rotNum * pi);
@@ -160,7 +160,7 @@ std::pair<Scalar, Eigen::RowVector4d> flippingDonut(Eigen::RowVector4d inputs)
     Scalar tt = inputs[3];
 
     // Constants
-    const Scalar pi = 3.14159;
+    const Scalar pi = std::numbers::pi;
 
     // Precomputed terms
     Scalar cos_pi_tt = std::cos(pi * tt);
@@ -230,7 +230,7 @@ std::pair<Scalar, Eigen::RowVector4d> flippingDonutFullTurn(Eigen::RowVector4d i
     Scalar tt = inputs[3];
 
     // Constants
-    const Scalar pi2 = 6.28319; // 2 * π
+    const Scalar pi2 = std::numbers::pi * 2;
 
     // Precomputed terms
     Scalar cos_pi2_tt = std::cos(pi2 * tt);
@@ -294,7 +294,7 @@ std::pair<Scalar, Eigen::RowVector4d> flippingDonut2(Eigen::RowVector4d input)
     Scalar z = input(2);
     Scalar t = input(3);
 
-    constexpr Scalar pi = 3.14159;
+    constexpr Scalar pi = std::numbers::pi;
     Scalar cos_pt = std::cos(pi * t);
     Scalar sin_pt = std::sin(pi * t);
 
@@ -374,8 +374,8 @@ std::pair<Scalar, Eigen::RowVector4d> rotatingSphere(Eigen::RowVector4d inputs)
     Scalar tt = inputs(3);
 
     // Constants
-    const Scalar pi2 = 6.28319; // 2 * π
-    const Scalar coeff = 2.51327; // π * 0.8
+    const Scalar pi2 = std::numbers::pi * 2; // 2 * π
+    const Scalar coeff = std::numbers::pi * 0.8; // π * 0.8
 
     // Precomputed terms
     Scalar cos_pi2_tt = std::cos(pi2 * tt);
@@ -432,8 +432,8 @@ std::pair<Scalar, Eigen::RowVector4d> rotatingSpherewLift(Eigen::RowVector4d inp
     Scalar tt = inputs(3);
 
     // Constants
-    const Scalar pi3 = 9.42478; // 3 * π
-    const Scalar coeff = 4.71239; // 1.5 * π
+    const Scalar pi3 = std::numbers::pi * 3; // 3 * π
+    const Scalar coeff = std::numbers::pi * 1.5; // 1.5 * π
     const Scalar drift = -0.15; // Coefficient for tt in zz term
     const Scalar zz_offset = -0.4; // Updated offset for zz
 
@@ -497,7 +497,7 @@ std::pair<Scalar, Eigen::RowVector4d> ellipsoidSine(Eigen::RowVector4d inputs)
     Scalar tt = inputs(3);
 
     // Constants
-    const Scalar pi2 = 6.28319; // 2 * π
+    const Scalar pi2 = std::numbers::pi * 2; // 2 * π
     const Scalar sin_coeff = 0.3; // Sine coefficient for yy
     const Scalar cos_coeff = 113.097; // Coefficient from gradient
     const Scalar scalar_coeff_xx = 30.0; // Coefficient for xx term
@@ -887,16 +887,16 @@ std::pair<Scalar, Eigen::RowVector4d> brush_stroke_blending(Eigen::RowVector4d i
     static stf::InterpolateFunction<3> blend(
         sweep1,
         sweep2,
-        [](stf::Scalar t) { return (std::sin(t * 3 * 2 * M_PI - M_PI / 2) + 1) / 2; },
-        [](stf::Scalar t) { return 3 * M_PI * std::cos(t * 3 * 2 * M_PI - M_PI / 2); });
+        [](stf::Scalar t) { return (std::sin(t * 3 * 2 * std::numbers::pi - std::numbers::pi / 2) + 1) / 2; },
+        [](stf::Scalar t) { return 3 * std::numbers::pi * std::cos(t * 3 * 2 * std::numbers::pi - std::numbers::pi / 2); });
     //                                             [](stf::Scalar t) {
-    //                                                 auto u = (1 - std::cos(6*t*M_PI))/2;
+    //                                                 auto u = (1 - std::cos(6*t*std::numbers::pi))/2;
     //                                                 return (10 * std::pow(u, 3) - 15 *
     //                                                 std::pow(u, 4) + 6 * std::pow(u, 5));
     //                                             },
     //                                             [](stf::Scalar t) {
-    //                                                 auto du = 3 * M_PI * std::sin(t * 3 * 2 *
-    //                                                 M_PI); return (30 * std::pow(du, 2) - 60 *
+    //                                                 auto du = 3 * std::numbers::pi * std::sin(t * 3 * 2 *
+    //                                                 std::numbers::pi); return (30 * std::pow(du, 2) - 60 *
     //                                                 std::pow(du, 3) + 30 * std::pow(du, 4));
     //                                             });
     auto& sweep_function = blend;
@@ -1070,8 +1070,8 @@ std::pair<Scalar, Eigen::RowVector4d> letter_L_blend(Eigen::RowVector4d inputs)
     static stf::SweepFunction<3> torus_sweep(torus, torus_curve);
     static stf::OffsetFunction<3> offset_function(
         torus_sweep,
-        [](stf::Scalar t) { return -0.01 * std::sin(t * 6 * M_PI) - 0.01; },
-        [](stf::Scalar t) { return -0.01 * std::cos(t * 6 * M_PI) * 6 * M_PI; });
+        [](stf::Scalar t) { return -0.01 * std::sin(t * 6 * std::numbers::pi) - 0.01; },
+        [](stf::Scalar t) { return -0.01 * std::cos(t * 6 * std::numbers::pi) * 6 * std::numbers::pi; });
     auto& sweep_function = offset_function;
     Scalar value = sweep_function.value({inputs(0), inputs(1), inputs(2)}, inputs(3));
     auto gradient = sweep_function.gradient({inputs(0), inputs(1), inputs(2)}, inputs(3));
@@ -1100,8 +1100,8 @@ std::pair<Scalar, Eigen::RowVector4d> loopDloop_with_offset(Eigen::RowVector4d i
     static stf::SweepFunction<3> torus_sweep(base_shape, bezier);
     static stf::OffsetFunction<3> offset_function(
         torus_sweep,
-        [](stf::Scalar t) { return -0.02 * std::cos(t * 2 * M_PI) - 0.02; },
-        [](stf::Scalar t) { return 0.02 * std::sin(t * 2 * M_PI) * 2 * M_PI; });
+        [](stf::Scalar t) { return -0.02 * std::cos(t * 2 * std::numbers::pi) - 0.02; },
+        [](stf::Scalar t) { return 0.02 * std::sin(t * 2 * std::numbers::pi) * 2 * std::numbers::pi; });
     auto& sweep_function = offset_function;
 
     Scalar value = sweep_function.value({inputs(0), inputs(1), inputs(2)}, inputs(3));
@@ -1760,7 +1760,7 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> igl_load_mesh(const std::string& fi
 
 std::pair<Scalar, Eigen::RowVector4d> ball_genus_roll(Eigen::RowVector4d inputs)
 {
-    const Scalar half_arclength = M_PI / 4 * 0.52 / 0.5 * 2;
+    const Scalar half_arclength = std::numbers::pi / 4 * 0.52 / 0.5 * 2;
     std::filesystem::path data_dir(DATA_DIR);
     std::string filename = (data_dir / "meshes" / "sphere_0.5.obj").string();
     static auto [V, F] = igl_load_mesh(filename);

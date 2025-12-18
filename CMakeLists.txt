@@ -11,35 +11,12 @@ project(swept_volume LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.28)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 
 set(FAST_ARRANGEMENT_ENABLE_PARALLEL OFF CACHE BOOL "" FORCE)
 set(GEO_ENABLE_THREADS               OFF CACHE BOOL "" FORCE)
-
-find_package(OpenMP QUIET COMPONENTS CXX)
-
-# OpenMP
-if (OpenMP_CXX_FOUND)
-  message(STATUS "OpenMP found: using OpenMP::OpenMP_CXX")
-  add_library(OpenMP::OpenMP_CXX ALIAS OpenMP::OpenMP_CXX)
-else()
-  message(WARNING "OpenMP not found by CMake; wiring Homebrew libomp manually")
-
-  # Homebrew paths on Apple Silicon:
-  set(LIBOMP_PREFIX "/opt/homebrew/opt/libomp")
-
-  add_library(OpenMP::OpenMP_CXX INTERFACE IMPORTED)
-  # AppleClang needs -Xpreprocessor -fopenmp
-  target_compile_options(OpenMP::OpenMP_CXX INTERFACE -Xpreprocessor -fopenmp)
-  target_include_directories(OpenMP::OpenMP_CXX INTERFACE "${LIBOMP_PREFIX}/include")
-  target_link_libraries(OpenMP::OpenMP_CXX INTERFACE "${LIBOMP_PREFIX}/lib/libomp.dylib")
-  # Ensure the runtime is found at run time
-  if (APPLE)
-    target_link_options(OpenMP::OpenMP_CXX INTERFACE
-      "-Wl,-rpath,${LIBOMP_PREFIX}/lib")
-  endif()
-endif()
 
 include(cli11)
 include(Eigen3)
@@ -58,7 +35,9 @@ include(yaml-cpp)
 include(nanothread)
 
 # project library
-target_compile_options(mtetcol PRIVATE -Wno-shorten-64-to-32 -Wno-logical-op-parentheses)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+    target_compile_options(mtetcol PRIVATE -Wno-shorten-64-to-32 -Wno-logical-op-parentheses)
+endif()
 set(TBB_STRICT           OFF CACHE BOOL   "" FORCE)
 set(TBB_WARNING_SUPPRESS "-Wno-shorten-64-to-32" CACHE STRING "" FORCE)
 file(GLOB SRC_FILES ${CMAKE_CURRENT_LIST_DIR}/src/*.cpp ${CMAKE_CURRENT_LIST_DIR}/src/*.h)
@@ -71,7 +50,6 @@ target_link_libraries(sweep
         Eigen3::Eigen
         lagrange::core
     PRIVATE
-        OpenMP::OpenMP_CXX
         arrangement::arrangement
         mshio::mshio
         mtet::mtet 
@@ -85,6 +63,7 @@ target_link_libraries(sweep
         stf::stf
 )
 add_library(sweep::sweep ALIAS sweep)
+set_target_properties(sweep PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 file(GLOB SWEEP_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/app/include/*.h)
 add_executable(generalized_sweep "app/generalized_sweep.cpp")
@@ -93,6 +72,7 @@ target_compile_features(generalized_sweep PRIVATE cxx_std_17)
 target_compile_definitions(generalized_sweep PRIVATE -DDATA_DIR="${CMAKE_CURRENT_LIST_DIR}/data")
 target_include_directories(generalized_sweep PRIVATE ${CMAKE_CURRENT_LIST_DIR}/app/include)
 target_sources(generalized_sweep PRIVATE ${SWEEP_HEADERS})
+set_target_properties(generalized_sweep PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(generalized_sweep
     PRIVATE
         sweep::sweep

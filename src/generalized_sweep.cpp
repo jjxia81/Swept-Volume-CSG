@@ -205,7 +205,7 @@ void load_config(std::filesystem::path config_path,
         return;
     }
 
-    YAML::Node config = YAML::LoadFile(config_path);
+    YAML::Node config = YAML::LoadFile(config_path.string());
     if (config["grid"]) {
         auto grid_config = config["grid"];
         if (grid_config["resolution"]) {
@@ -369,7 +369,7 @@ SweepResult generalized_sweep_from_config(
     load_config(config_file, grid_spec, options);
 
     std::shared_ptr<stf::SpaceTimeFunction<3>> func =
-        stf::parse_space_time_function_from_file<3>(function_file);
+        stf::parse_space_time_function_from_file<3>(function_file.string());
     auto implicit_sweep = [f = std::move(func)](
                          Eigen::RowVector4d data) -> std::pair<Scalar, Eigen::RowVector4d> {
         auto val = f->value({data[0], data[1], data[2]}, data[3]);

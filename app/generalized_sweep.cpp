@@ -61,7 +61,7 @@ void load_config(std::string config_file, sweep::GridSpec& grid_spec, sweep::Swe
         return;
     }
 
-    YAML::Node config = YAML::LoadFile(config_path);
+    YAML::Node config = YAML::LoadFile(config_path.string());
     if (config["grid"]) {
         auto grid_config = config["grid"];
         if (grid_config["resolution"]) {

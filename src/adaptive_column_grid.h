@@ -48,7 +48,7 @@ public:
     ~vertex4d() = default;
 };
 
-auto compVertex = [](vertex4d v0, vertex4d v1) { return v0.time < v1.time; };
+inline bool compVertex(vertex4d v0, vertex4d v1) { return v0.time < v1.time; }
 
 /// A 4D simplex(5-cell) . Each is equipped iwth the following parameters:
 /// @param hash: The index of the 5 vertices. This indexing system has the following structured 5-cell representation:

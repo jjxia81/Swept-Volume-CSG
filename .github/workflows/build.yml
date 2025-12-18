@@ -1,0 +1,43 @@
+name: build and test
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  build-Ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: build and run
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        cmake --build . --config Release -j4
+
+  build-MacOS:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: build and run
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        cmake --build . --config Release -j4
+
+  build-Windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: build and run
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_GENERATOR_PLATFORM=x64
+        cmake --build . --config Release -j4

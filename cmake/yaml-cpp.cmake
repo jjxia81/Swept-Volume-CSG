@@ -10,3 +10,4 @@ CPMAddPackage(
     GITHUB_REPOSITORY jbeder/yaml-cpp
     GIT_TAG yaml-cpp-0.7.0
 )
+set_target_properties(yaml-cpp PROPERTIES POSITION_INDEPENDENT_CODE ON)

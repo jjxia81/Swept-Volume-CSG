@@ -33,7 +33,7 @@ We also provide a Python binding for easy integration with Python workflows:
 
 ```bash
 # Install the Python package
-pip install .
+pip install sweep3d
 ```
 
 ## Usage

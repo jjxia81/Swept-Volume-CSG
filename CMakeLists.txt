@@ -42,9 +42,12 @@ set(TBB_STRICT           OFF CACHE BOOL   "" FORCE)
 set(TBB_WARNING_SUPPRESS "-Wno-shorten-64-to-32" CACHE STRING "" FORCE)
 file(GLOB SRC_FILES ${CMAKE_CURRENT_LIST_DIR}/src/*.cpp ${CMAKE_CURRENT_LIST_DIR}/src/*.h)
 add_library(sweep STATIC ${SRC_FILES})
-target_include_directories(sweep PUBLIC
-    ${CMAKE_CURRENT_LIST_DIR}/include
-    ${CMAKE_CURRENT_LIST_DIR}/src)
+target_include_directories(sweep
+    PUBLIC
+        ${CMAKE_CURRENT_LIST_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/src
+)
 target_link_libraries(sweep
     PUBLIC 
         Eigen3::Eigen

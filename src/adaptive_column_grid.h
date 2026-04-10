@@ -23,7 +23,8 @@ using namespace mtet;
 constexpr int MAX_TIME = 1 << 10; // 1024
 constexpr int MIN_TIME = 1 << 2; //   4
 constexpr int MAX_CELL_INTERVALS = 4 * (MAX_TIME / MIN_TIME); // 1024
-
+using MatrixX4dRowMajor =
+    Eigen::Matrix<double, Eigen::Dynamic, 4, Eigen::RowMajor>;
 /// A 4D vertex, each is equipped with the following parameters:
 /// @param time: an integer-valued time stamp. The default max of this value is 1024. The fourth coordinate of this vertex is a floating point of this value divided by 1024.
 /// @param coord: The 4D coordinate of this vertex
@@ -32,10 +33,16 @@ constexpr int MAX_CELL_INTERVALS = 4 * (MAX_TIME / MIN_TIME); // 1024
 /// @param eval: If this vertex is evaluated
 class vertex4d
 {
+
 public:
     int time; // int-valued hash; Default largest vert4dList is 1024
+    size_t domfNum;
     Eigen::RowVector4d coord;
     std::pair<Scalar, Eigen::RowVector4d> valGradList;
+    // Eigen::Matrix<double, -1, 4, Eigen::RowMajor>  
+    Eigen::RowVectorXd vals; 
+    MatrixX4dRowMajor grads;
+    // std::vector<std::pair<Scalar, Eigen::RowVector4d>> valGradListCSG;
     vertex4d() = default;
     vertex4d(
         int t,
@@ -45,8 +52,14 @@ public:
         , coord(c)
         , valGradList(vg)
     {}
+    vertex4d(size_t fNum) : domfNum(fNum), vals(fNum), grads(fNum, 4) {
+        vals.setZero();
+        grads.setZero();
+    }
     ~vertex4d() = default;
 };
+
+
 
 inline bool compVertex(vertex4d v0, vertex4d v1) { return v0.time < v1.time; }
 
@@ -147,7 +160,7 @@ public:
 
     /// find a list of time stamps of the 4D vertices in this column
     /// @return a list of integer-valued time stamp
-    time_list getTimeList()
+    time_list getTimeList() const
     {
         time_list timeList(vert4dList.size());
         for (size_t i = 0; i < vert4dList.size(); i++) {
@@ -158,7 +171,7 @@ public:
 
     /// find a list of time stamps of the 4D vertices in this column
     /// @return a list of integer-valued time stamp
-    time_list_f getTimeList_f()
+    time_list_f getTimeList_f() const
     {
         time_list_f timeList(vert4dList.size());
         for (size_t i = 0; i < vert4dList.size(); i++) {
@@ -167,7 +180,7 @@ public:
         return timeList;
     }
 
-    value_list getValueList()
+    value_list getValueList() const
     {
         value_list valList(vert4dList.size());
         for (size_t i = 0; i < vert4dList.size(); i++) {

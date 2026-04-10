@@ -46,4 +46,24 @@ bool gridRefine(
     const double min_tet_radius_ratio,
     const double min_tet_edge_length);
 
+bool gridRefineCSG(
+    mtet::MTetMesh& grid,
+    vertExtrude& vertexMap,
+    insidenessMap& insideMap,
+    const std::vector<std::function<std::pair<Scalar, Eigen::RowVector4d>(Eigen::RowVector4d)>>& csg_funcs,
+    const double threshold,
+    const double traj_threshold,
+    const int max_splits,
+    const int insideness_check,
+    std::array<double, timer_amount>& profileTimer,
+    std::array<size_t, timer_amount>& profileCount,
+    size_t initial_time_samples,
+    const double min_tet_radius_ratio,
+    const double min_tet_edge_length);
 #endif /* col_gridgen_h */
+
+
+void sampleCol(
+    const std::span<mtet::VertexId, 4>& vs,
+    vertExtrude& vertexMap,
+    simpCol::cell5_list& cell5Col);

@@ -178,7 +178,7 @@ int main(int argc, const char* argv[])
     igl::AABB<Eigen::MatrixXd, 3> tree;
     igl::FastWindingNumberBVH fwn_bvh;
     std::function<std::pair<Scalar, Eigen::RowVector4d>(Eigen::RowVector4d)> implicit_sweep;
-    if (args.function_file != "") {
+    if(args.function_file != "") {
         if (args.function_file.find(".obj") != std::string::npos) {
             igl::read_triangle_mesh(args.function_file, V, F);
             tree.init(V, F);
@@ -369,10 +369,13 @@ int main(int argc, const char* argv[])
         sweep::logger().info("Output directory already exists: {}", output_path);
     }
 
+    lagrange::io::save_mesh(output_path + "/sweep_surface.obj", sweep_surface); 
     lagrange::io::save_mesh(output_path + "/envelope.msh", envelope);
     lagrange::io::save_mesh(output_path + "/sweep_surface.msh", sweep_surface);
     lagrange::io::save_mesh(output_path + "/arrangement.msh", sweep_arrangement);
     save_features(output_path + "/features.obj", sweep_arrangement);
+
+    
 #if SAVE_CONTOUR
     // mtet::save_mesh(output_path + "/tet_grid.msh", grid);
     // save_grid_for_mathematica(output_path + "/contour_iso.json", grid,

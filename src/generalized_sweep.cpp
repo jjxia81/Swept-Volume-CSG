@@ -20,6 +20,18 @@
 
 namespace sweep {
 
+
+size_t calRefinedGridSampleNumber(vertExtrude& vertexMap)
+{
+    size_t total_sample_number = 0; 
+    for(auto& ele : vertexMap)
+    {
+        const auto& cur_col = ele.second;
+        total_sample_number += cur_col.vert4dList.size();
+    }
+    return total_sample_number;
+}
+
 std::tuple<
     std::vector<Scalar>,
     std::vector<Index>,
@@ -58,7 +70,10 @@ refine_grid(const SpaceTimeFunction& f, mtet::MTetMesh& grid, const SweepOptions
             options.min_tet_edge_length)) {
         throw std::runtime_error("ERROR: grid generation failed");
     };
+
     spdlog::set_level(spdlog::level::info);
+    size_t total_sample_number = calRefinedGridSampleNumber(vertexMap);
+    sweep::logger().info("--Total sample number {}", total_sample_number);
 
     bool cyclic = options.cyclic;
     std::vector<mtetcol::Scalar> verts;

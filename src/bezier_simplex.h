@@ -123,6 +123,98 @@ Eigen::RowVector<double, 35>& bezierGrad);
 bool outHullClip2D(Eigen::Matrix<double, 2, 35> pts);
 
 
+/// Construct the values of one function at the bezier control points within a tet.
+///
+/// @param[in] p1-p4          The vertex cooridantes of four tet vertices.
+/// @param[in] v1-v4         The function values at four tet vertices.
+/// @param[in] g1-g4            The total derivative of the functions in x, y, z, t direction at four tet vertices.
+/// @param[out] bezier          The eigen vector of 20 bezier values.
+///
+/// @return         If 20 bezier values contain zero-crossing.
+inline bool bezier3D(
+    const Eigen::RowVector4d& p1,
+    const Eigen::RowVector4d& p2,
+    const Eigen::RowVector4d& p3,
+    const Eigen::RowVector4d& p4,
+    const double v1,
+    const double v2,
+    const double v3,
+    const double v4,
+    const Eigen::RowVector4d& g1,
+    const Eigen::RowVector4d& g2,
+    const Eigen::RowVector4d& g3,
+    const Eigen::RowVector4d& g4,
+    Eigen::RowVector<double, 20>& bezier)
+{
+    // Compute edge values
+    std::array<double, 4> v1s = {
+        v1 + g1.dot(p2 - p1) / 3,
+        v1 + g1.dot(p3 - p1) / 3,
+        v1 + g1.dot(p4 - p1) / 3};
+
+    std::array<double, 4> v2s = {
+        v2 + g2.dot(p3 - p2) / 3,
+        v2 + g2.dot(p4 - p2) / 3,
+        v2 + g2.dot(p1 - p2) / 3};
+
+    std::array<double, 4> v3s = {
+        v3 + g3.dot(p4 - p3) / 3,
+        v3 + g3.dot(p1 - p3) / 3,
+        v3 + g3.dot(p2 - p3) / 3};
+
+    std::array<double, 4> v4s = {
+        v4 + g4.dot(p1 - p4) / 3,
+        v4 + g4.dot(p2 - p4) / 3,
+        v4 + g4.dot(p3 - p4) / 3};
+    // Compute face values
+    double face1 =
+        (9 * (v2s[0] + v2s[1] + v3s[0] + v3s[2] + v4s[1] + v4s[2]) / 6 - v2 - v3 - v4) / 6;
+    double face2 =
+        (9 * (v1s[1] + v1s[2] + v3s[0] + v3s[1] + v4s[0] + v4s[2]) / 6 - v1 - v3 - v4) / 6;
+    double face3 =
+        (9 * (v1s[0] + v1s[2] + v2s[1] + v2s[2] + v4s[0] + v4s[1]) / 6 - v1 - v2 - v4) / 6;
+    double face4 =
+        (9 * (v1s[0] + v1s[1] + v2s[0] + v2s[2] + v3s[1] + v3s[2]) / 6 - v1 - v2 - v3) / 6;
+
+    // Combine results into a single row vector
+    bezier << v1, v2, v3, v4, v1s[0], v1s[1], v1s[2], v2s[0], v2s[1], v2s[2], v3s[0], v3s[1],
+        v3s[2], v4s[0], v4s[1], v4s[2], face1, face2, face3, face4;
+
+    if (get_sign(bezier.maxCoeff()) == get_sign(bezier.minCoeff())) {
+        return false;
+    }
+    return true;
+}
+
+/// Construct the value differences between linear interpolations and bezier approximations at 16 bezier control points (excluding control points at tet vertices)
+/// @param[in] valList          The eigen vector of 20 bezier values.
+///
+/// @return         The value differences at 16 control points.
+inline Eigen::Vector<double, 16> bezierDiff(const Eigen::Vector<double, 20> valList)
+{
+    /// Constant coefficient to obtain linear interpolated values at each bezier control points
+    const Eigen::Matrix<double, 16, 4> linear_coeff{
+        {2, 1, 0, 0},
+        {2, 0, 1, 0},
+        {2, 0, 0, 1},
+        {0, 2, 1, 0},
+        {0, 2, 0, 1},
+        {1, 2, 0, 0},
+        {0, 0, 2, 1},
+        {1, 0, 2, 0},
+        {0, 1, 2, 0},
+        {1, 0, 0, 2},
+        {0, 1, 0, 2},
+        {0, 0, 1, 2},
+        {0, 1, 1, 1},
+        {1, 0, 1, 1},
+        {1, 1, 0, 1},
+        {1, 1, 1, 0}};
+    Eigen::Vector<double, 16> linear_val = (linear_coeff * valList.head(4)) / 3;
+    return valList.tail(16) - linear_val;
+}
+
+
 
 [[gnu::always_inline]]
 inline void bezier4D(

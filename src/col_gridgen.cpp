@@ -12,6 +12,7 @@
 
 #define parallel_bezier 0
 
+
 /// Sample the list of 5-cells based on the base tetrahedra and 4 lists of time samples at its vertices. The extrusion/sampling is based on lowest time stamp, the second lowest time stamp, and the vertex id comparing the four incremental time stamps at each vertex.
 /// @param[in] grid: the base tetrahedra grid in `mtet` structure
 /// @param[in] tid: the tetrahedra id that is going to be extruded
@@ -339,7 +340,7 @@ void compare_time(const double tet_time, const double poly_time, bool& intersect
     }
 }
 
-std::vector<uint32_t> one_column_simp = {0, 1, 2, 3};
+
 
 ///see descriptions in header
 bool gridRefine(
@@ -390,6 +391,7 @@ bool gridRefine(
     std::vector<bool> zeroX_list(MAX_CELL_INTERVALS);
     std::array<vertex4d*, 5> verts{};
     std::array<vertex4d, 4> verts_3d{};
+    std::vector<uint32_t> one_column_simp = {0, 1, 2, 3};
     ///
     /// Push Queue Function:
     auto push_one_col = [&](mtet::TetId tid) {
@@ -698,85 +700,6 @@ bool gridRefine(
         second_part_timer.Stop();
     #endif
 #endif
-    };
-
-    auto push_simps = [&](mtet::TetId tid,
-                          simpCol::cell5_list cell5Col,
-                          llvm_vecsmall::SmallVector<size_t, 256> refineList) {
-        std::span<VertexId, 4> vs = grid.get_tet(tid);
-        std::array<vertexCol, 4> baseVerts;
-        for (size_t i = 0; i < 4; i++) {
-            baseVerts[i] = vertexMap[value_of(vs[i])];
-        }
-        /// Compute longest spatial edge
-        mtet::EdgeId longest_edge;
-        mtet::Scalar longest_edge_length = 0;
-        bool baseSub = false;
-        grid.foreach_edge_in_tet(tid, [&](mtet::EdgeId eid, mtet::VertexId v0, mtet::VertexId v1) {
-            auto p0 = grid.get_vertex(v0);
-            auto p1 = grid.get_vertex(v1);
-            mtet::Scalar l = std::sqrt((p0[0] - p1[0]) * (p0[0] - p1[0]) + (p0[1] - p1[1]) * (p0[1] - p1[1]) +
-                             (p0[2] - p1[2]) * (p0[2] - p1[2]));
-            if (l > longest_edge_length) {
-                longest_edge_length = l;
-                longest_edge = eid;
-            }
-        });
-        std::vector<int> timeLenList(refineList.size());
-        std::vector<mtet::Scalar> timeList(refineList.size());
-        std::vector<size_t> indList(refineList.size());
-        std::vector<bool> subList(refineList.size(), false);
-        std::vector<bool> choiceList(refineList.size());
-        for (size_t it = 0; it < refineList.size(); it++) {
-            size_t cell5It = refineList[it];
-            auto simp = cell5Col[cell5It];
-            std::array<int, 5> cell5Index = simp.hash;
-            int lastInd = cell5Index[4];
-            std::array<vertex4d, 5> verts;
-            verts[0] = baseVerts[lastInd].vert4dList[cell5Index[lastInd]];
-            size_t ind = 0;
-            for (size_t i = 0; i < 4; i++) {
-                if (i != lastInd) {
-                    ind++;
-                    verts[ind] = baseVerts[i].vert4dList[cell5Index[i]];
-                }
-            }
-            verts[4] = baseVerts[lastInd].vert4dList[cell5Index[lastInd] - 1];
-            bool inside = false;
-            bool choice = false;
-            bool zeroX = false;
-            //            bool ret = refineFt(verts, traj_threshold, inside, choice, zeroX,
-            //            profileTimer, profileCount);
-            bool ret = false;
-            if (inside) {
-                insideMap[vs] = true;
-                return;
-            }
-            if (ret) {
-                subList[it] = true;
-                timeLenList[it] = verts[0].time - verts[4].time;
-                timeList[it] = (verts[0].time + verts[4].time) / 2;
-                indList[it] = lastInd;
-                choiceList[it] = choice;
-            }
-        }
-        for (size_t it = 0; it < refineList.size(); it++) {
-            size_t cell5It = refineList[it];
-            if (subList[it]) {
-                if (choiceList[it]) {
-                    if (timeLenList[it] > MIN_TIME) {
-                        timeQ.emplace_back(timeLenList[it] / MAX_TIME * time_scale, tid, vs[indList[it]], timeList[it]);
-                        std::push_heap(timeQ.begin(), timeQ.end(), compTime);
-                    }
-                } else {
-                    if (!baseSub) {
-                        spaceQ.emplace_back(longest_edge_length, tid, longest_edge);
-                        std::push_heap(spaceQ.begin(), spaceQ.end(), compSpace);
-                        baseSub = true;
-                    }
-                }
-            }
-        }
     };
 
     grid.seq_foreach_tet(

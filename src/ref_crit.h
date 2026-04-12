@@ -9,9 +9,10 @@
 #define ref_crit_h
 
 #include <cmath>
-
+#include <unordered_set>
 #include "adaptive_column_grid.h"
 #include "timer.h"
+
 
 
 struct RefineResInfo{
@@ -21,7 +22,7 @@ struct RefineResInfo{
     bool chooseTemporalRefine = false;
     bool meetThreshold = false;
     double error = 0;
-}
+};
 
 
 /// 4D (un-projected) distance check for the time derivative function for a given 4D 5-cell. The default threshold here is 0.01, and it will not change with user's input
@@ -41,6 +42,15 @@ bool refineFt(
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount);
 
+bool refineFtCSG(
+    const std::array<vertex4d*, 5>& verts,
+    const double threshold,
+    bool& choice,
+    bool& zeroX,
+    std::array<double, timer_amount>& profileTimer,
+    std::array<size_t, timer_amount>& profileCount,
+    std::unordered_set<size_t>& domFuncIds);
+
 /// Refine critiera that only invokes the bezier computation. This is the samllest testing unit for comparing the run speed across different methods of constructing bezier simplex.
 bool refineFtBezier(
     const std::array<vertex4d*, 5>& verts,
@@ -59,5 +69,13 @@ bool refineFtBezier(
 /// @return         A boolean that decides if this tetrahedra needs to be subdivided.
 bool refine3D(const std::array<vertex4d, 4>& verts, const double threshold);
 
+bool refine3DCSG(const std::array<vertex4d*, 4>& verts, const double threshold, size_t csg_fn);
+bool refine3DCSG(
+    const std::array<vertex4d*, 4>& verts,
+    const double threshold,
+    const std::unordered_set<size_t>& domfIds);
+
 bool refineCap(const std::array<vertex4d, 4> verts, const double threshold, bool& zeroX);
 #endif /* ref_crit_h */
+
+

@@ -14,6 +14,8 @@
 #include "tet_quality.h"
 #include "timer.h"
 
+
+
 /// Create a column-wise 4D grid data structure. It contains a base 3D tetrahedra grid. On top of each vertex and tetrahedra, there sits a column of 4D data. For a 3D vertex, there is a list of 4D vertices that only differ in the fourth coordinate. For a 3D tet, there is a list of 4D 5-cell/simplex that two of its tetrahedra faces can be projected down to the same 3D tet, and three of the faces are projected down to 2D triangular faces.
 /// @param[out] grid         The base 3D tetrahedra grid.
 /// @param[out] vertexMap            This maps a 3D vertex to a 4D vertex column. Details of the data structure can be found in `adaptive_column_grid.h`.
@@ -46,6 +48,23 @@ bool gridRefine(
     const double min_tet_radius_ratio,
     const double min_tet_edge_length);
 
+using CSGFuncs = std::vector<std::function<std::pair<Scalar, Eigen::RowVector4d>(Eigen::RowVector4d)>>;  
+
+bool gridRefine2(
+    mtet::MTetMesh& grid,
+    vertExtrude& vertexMap,
+    insidenessMap& insideMap,
+    const CSGFuncs& funcs,
+    const double threshold,
+    const double traj_threshold,
+    const int max_splits,
+    const int insideness_check,
+    std::array<double, timer_amount>& profileTimer,
+    std::array<size_t, timer_amount>& profileCount,
+    size_t initial_time_samples,
+    const double min_tet_radius_ratio,
+    const double min_tet_edge_length);
+
 bool gridRefineCSG(
     mtet::MTetMesh& grid,
     vertExtrude& vertexMap,
@@ -67,3 +86,35 @@ void sampleCol(
     const std::span<mtet::VertexId, 4>& vs,
     vertExtrude& vertexMap,
     simpCol::cell5_list& cell5Col);
+
+void parse_vertices(
+    const mtetcol::Contour<4>& contour,
+    std::vector<double>& contour_time,
+    std::vector<int>& contour_index,
+    std::vector<Eigen::RowVector4d>& contour_pos,
+    const std::array<mtet::Scalar, 12>& spatial_verts);
+
+void parse_polyhedron(
+    const mtetcol::Contour<4>& contour,
+    mtetcol::Index poly_id,
+    std::vector<mtetcol::Index>& vert_id);
+
+void compare_time(const double tet_time, const double poly_time, bool& intersect, int& sign);
+
+void init5CGrid(
+    const size_t initial_time_sampels,
+    mtet::MTetMesh grid,
+    const std::function<std::pair<Scalar, Eigen::RowVector4d>(Eigen::RowVector4d)> func,
+    const int maxTimeDep,
+    vertExtrude& vertexMap);
+
+void init5CGridCSG(
+    const size_t initial_time_sampels,
+    mtet::MTetMesh grid,
+    const std::vector<std::function<std::pair<Scalar, Eigen::RowVector4d>(Eigen::RowVector4d)>> csg_funcs,
+    const int maxTimeDep,
+    vertExtrude& vertexMap);
+
+mtet::Scalar calTimeGlobalScaleWithInitGridCSG(vertExtrude& vertexMap);
+
+mtet::Scalar calTimeGlobalScaleWithInitGrid(vertExtrude& vertexMap);

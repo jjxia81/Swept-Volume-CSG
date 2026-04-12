@@ -54,11 +54,13 @@ refine_grid(const SpaceTimeFunction& f, mtet::MTetMesh& grid, const SweepOptions
     std::array<double, timer_amount> profileTimer{};
     std::array<size_t, timer_amount> profileCount{};
     spdlog::set_level(spdlog::level::off);
-    if (!gridRefine(
+    std::vector<SpaceTimeFunction>  funcs;
+    funcs.push_back(f);
+    if (!gridRefine2(
             grid,
             vertexMap,
             insideMap,
-            f,
+            funcs,
             options.epsilon_env,
             options.epsilon_sil,
             options.max_split,

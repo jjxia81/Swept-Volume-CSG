@@ -183,11 +183,11 @@ void getBezier4DDomFuncIds(
         bezier4D(p1, p2, p3, p4, p5, v1s[fid], v2s[fid], v3s[fid], v4s[fid], v5s[fid], 
             g1s.row(fid), g2s.row(fid), g3s.row(fid), g4s.row(fid), g5s.row(fid), bezierCoords.row(fid));
     }
+    
     std::unordered_set<size_t> dFIds; 
     for(int i = 0; i < 35; ++i)
     {
-        RVecX data = bezierCoords.col(i);
-        auto [val, id] = csg_fun(data);
+        auto [val, id] = csg_fun(bezierCoords.col(i));
         dFIds.insert(id);
     }
     domFIds.assign(dFIds.begin(), dFIds.end());

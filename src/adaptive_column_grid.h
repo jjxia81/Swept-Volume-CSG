@@ -189,6 +189,15 @@ public:
         return valList;
     }
 
+    value_list getValueList(size_t DomfId) const
+    {
+        value_list valList(vert4dList.size());
+        for (size_t i = 0; i < vert4dList.size(); i++) {
+            valList[i] = vert4dList[i].vals[DomfId];
+        }
+        return valList;
+    }
+
     void sortTime() { std::sort(vert4dList.begin(), vert4dList.end(), compVertex); }
 };
 

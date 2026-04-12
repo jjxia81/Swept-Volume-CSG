@@ -364,7 +364,7 @@ TetrahedronGeometry computeTetrahedronGeometry(const Eigen::Matrix3d& edges)
     crossMatrix.col(1) = vec3.cross(vec1);
     crossMatrix.col(2) = vec1.cross(vec2);
 
-    return { crossMatrix, edges.determinant() };
+    return {crossMatrix, edges.determinant() };
 }
 
 // Computes the unnormalized gradient direction for a single CSG function

@@ -33,14 +33,14 @@ using MatrixX4dRowMajor =
 /// @param eval: If this vertex is evaluated
 class vertex4d
 {
-
+    using funcVGrad = std::pair<Scalar, Eigen::RowVector4d> ;
 public:
     int time; // int-valued hash; Default largest vert4dList is 1024
     size_t domfNum;
     Eigen::RowVector4d coord;
-    std::pair<Scalar, Eigen::RowVector4d> valGradList;
-    // Eigen::Matrix<double, -1, 4, Eigen::RowMajor>  
+    funcVGrad valGradList;
     Eigen::RowVectorXd vals; 
+    std::vector<funcVGrad> funcVGrads;
     MatrixX4dRowMajor grads;
     // std::vector<std::pair<Scalar, Eigen::RowVector4d>> valGradListCSG;
     vertex4d() = default;
@@ -52,7 +52,7 @@ public:
         , coord(c)
         , valGradList(vg)
     {}
-    vertex4d(size_t fNum) : domfNum(fNum), vals(fNum), grads(fNum, 4) {
+    vertex4d(size_t fNum) : domfNum(fNum), vals(fNum), grads(fNum, 4), funcVGrads(fNum){
         vals.setZero();
         grads.setZero();
     }
@@ -189,11 +189,11 @@ public:
         return valList;
     }
 
-    value_list getValueList(size_t DomfId) const
+    value_list getFtValueList(size_t DomfId) const
     {
         value_list valList(vert4dList.size());
         for (size_t i = 0; i < vert4dList.size(); i++) {
-            valList[i] = vert4dList[i].vals[DomfId];
+            valList[i] = vert4dList[i].grads.row(DomfId)[3];
         }
         return valList;
     }

@@ -40,8 +40,8 @@ static auto compSpace = [](const SpaceElem& a, const SpaceElem& b) {
 // ============================================================
 
 struct ColScratch {
-    std::array<vertexCol*, 4>          tet3DVertsPtr{};
-    std::array<Eigen::RowVector4d, 4>  tet3DCoord{};
+    std::array<vertexCol*, 4>          baseVertsPtr{};
+    std::array<Eigen::RowVector4d, 4>  baseCoord{};
     mtet::EdgeId                        longest_edge{};
     mtet::Scalar                        longest_edge_length = 0;
     std::array<vertex4d*, 5>            tet4DVertsPtr{};
@@ -61,16 +61,16 @@ struct ColScratch {
 //  Small pure helpers
 // ============================================================
 
-/// Populate tet3DVertsPtr[] and baseCoord[] for the four corners of a tet.
+/// Populate baseVertsPtr[] and baseCoord[] for the four corners of a tet.
 static void gather_base_verts(
     const std::span<VertexId, 4>&      vs,
     vertExtrude&                        vertexMap,
-    std::array<vertexCol*, 4>&          tet3DVertsPtr,
+    std::array<vertexCol*, 4>&          baseVertsPtr,
     std::array<Eigen::RowVector4d, 4>& baseCoord)
 {
     for (size_t i = 0; i < 4; i++) {
-        tet3DVertsPtr[i] = &vertexMap[value_of(vs[i])];
-        baseCoord[i] = tet3DVertsPtr[i]->vert4dList[0].coord;
+        baseVertsPtr[i] = &vertexMap[value_of(vs[i])];
+        baseCoord[i] = baseVertsPtr[i]->vert4dList[0].coord;
     }
 }
 
@@ -99,17 +99,17 @@ static void find_longest_edge(
 /// Fill verts[0..4] from a cell5 entry and its base vertex columns.
 static void bind_cell5_verts(
     const cell5&                       simp,
-    const std::array<vertexCol*, 4>&   tet3DVertsPtr,
+    const std::array<vertexCol*, 4>&   baseVertsPtr,
     std::array<vertex4d*, 5>&          vertsPtr)
 {
     const int* idx    = simp.hash.data();
     const int  lastInd = idx[4];
-    vertsPtr[0] = &tet3DVertsPtr[lastInd]->vert4dList[idx[lastInd]];
+    vertsPtr[0] = &baseVertsPtr[lastInd]->vert4dList[idx[lastInd]];
     size_t ind = 0;
     for (size_t i = 0; i < 4; i++)
         if (i != (size_t)lastInd)
-            vertsPtr[++ind] = &tet3DVertsPtr[i]->vert4dList[idx[i]];
-    vertsPtr[4] = &tet3DVertsPtr[lastInd]->vert4dList[idx[lastInd] - 1];
+            vertsPtr[++ind] = &baseVertsPtr[i]->vert4dList[idx[i]];
+    vertsPtr[4] = &baseVertsPtr[lastInd]->vert4dList[idx[lastInd] - 1];
 }
 
 /// Push a spatial refinement entry (no-op if already pushed or edge too short).
@@ -146,20 +146,20 @@ static void collect_spatial_verts(
 }
 
 static mtetcol::Contour<4> extract_column_contour(
-    const std::array<vertexCol*, 4>&         tet3DVertsPtr,
+    const std::array<vertexCol*, 4>&         baseVertsPtr,
     std::array<mtet::Scalar, 12>&      spatial_verts,
     std::vector<uint32_t>&   one_column_simp,
     const size_t domfId)
 {
     std::array<vertexCol::time_list_f, 4> time = {
-        tet3DVertsPtr[0]->getTimeList_f(), tet3DVertsPtr[1]->getTimeList_f(),
-        tet3DVertsPtr[2]->getTimeList_f(), tet3DVertsPtr[3]->getTimeList_f()};
+        baseVertsPtr[0]->getTimeList_f(), baseVertsPtr[1]->getTimeList_f(),
+        baseVertsPtr[2]->getTimeList_f(), baseVertsPtr[3]->getTimeList_f()};
     std::function<std::span<double>(size_t)> time_func =
         [&](size_t i) -> std::span<double> { return time[i]; };
 
     std::array<vertexCol::value_list, 4> values = {
-        tet3DVertsPtr[0]->getValueList(domfId), tet3DVertsPtr[1]->getValueList(domfId),
-        tet3DVertsPtr[2]->getValueList(domfId), tet3DVertsPtr[3]->getValueList(domfId)};
+        baseVertsPtr[0]->getFtValueList(domfId), baseVertsPtr[1]->getFtValueList(domfId),
+        baseVertsPtr[2]->getFtValueList(domfId), baseVertsPtr[3]->getFtValueList(domfId)};
     std::function<std::span<double>(size_t)> values_func =
         [&](size_t i) -> std::span<double> { return values[i]; };
 
@@ -169,19 +169,6 @@ static mtetcol::Contour<4> extract_column_contour(
     column.set_time_samples(time_func, values_func);
     return column.extract_contour(0.0, false);
 }
-
-// static void compare_time(double tet_time, double poly_time, bool& intersect, int& sign)
-// {
-//     if (tet_time == poly_time) {
-//         intersect = true;
-//     } else if (tet_time > poly_time) {
-//         if (sign == -1) intersect = true;
-//         sign = 1;
-//     } else {
-//         if (sign == 1) intersect = true;
-//         sign = -1;
-//     }
-// }
 
 static bool cell5_intersects_poly(
     const cell5&                                   simp,
@@ -285,19 +272,19 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
         combine_timer(profileTimer, profileCount, t, ms); });
 #endif
 
-    const auto& vs = grid.get_tet(tid);
+    const auto& tetVids = grid.get_tet(tid);
 
     simpCol::cell5_list cell5Col;
-    sampleCol(vs, vertexMap, cell5Col);
+    sampleCol(tetVids, vertexMap, cell5Col);
 
-    gather_base_verts(vs, vertexMap, sc.tet3DVertsPtr, sc.tet3DCoord);
+    gather_base_verts(tetVids, vertexMap, sc.baseVertsPtr, sc.baseCoord);
 
     // Tet quality — mark degenerate tets as inside and skip further work
     {
-        std::valarray<double> p0(sc.tet3DCoord[0].data(), 3);
-        std::valarray<double> p1(sc.tet3DCoord[1].data(), 3);
-        std::valarray<double> p2(sc.tet3DCoord[2].data(), 3);
-        std::valarray<double> p3(sc.tet3DCoord[3].data(), 3);
+        std::valarray<double> p0(sc.baseCoord[0].data(), 3);
+        std::valarray<double> p1(sc.baseCoord[1].data(), 3);
+        std::valarray<double> p2(sc.baseCoord[2].data(), 3);
+        std::valarray<double> p3(sc.baseCoord[3].data(), 3);
         const auto tet_ratio = tet_radius_ratio({p0, p1, p2, p3});
         if (tet_ratio < min_tet_radius_ratio) {
             // insideMap[vs] = true;
@@ -321,7 +308,7 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
     // sc.cellDomFuncIds.resize(cell5Col.size());
     sc.cellDomFuncIds.assign(cell5Col.size(), {});
     for (size_t ci = 0; ci < cell5Col.size(); ci++) {
-        bind_cell5_verts(cell5Col[ci], sc.tet3DVertsPtr, sc.tet4DVertsPtr);
+        bind_cell5_verts(cell5Col[ci], sc.baseVertsPtr, sc.tet4DVertsPtr);
 
         bool choice = false, zeroX = false;
         const bool needs_refine  =
@@ -330,14 +317,6 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
 
         sc.zeroX_list[ci] = zeroX;
         if (zeroX) no_intersect = false;
-
-//         if (insideness_check && inside) {
-//             insideMap[vs] = true;
-// #if time_profile
-//             first_part_timer.Stop();
-// #endif
-//             return;
-//         }
 
         if (needs_refine) {
             sc.subList[ci]     = true;
@@ -363,12 +342,15 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
             if (sc.timeLenList[ci] > MIN_TIME) {
                 timeQ.emplace_back(
                     (double)sc.timeLenList[ci] * time_scale / MAX_TIME,
-                    tid, vs[sc.indList[ci]], (int)sc.timeList[ci]);
+                    tid, tetVids[sc.indList[ci]], (int)sc.timeList[ci]);
                 std::push_heap(timeQ.begin(), timeQ.end(), compTime);
             }
         } else {
-            try_push_space(spaceQ, baseSub, tid,
+            if(! baseSub)
+            {
+                try_push_space(spaceQ, baseSub, tid,
                            sc.longest_edge, sc.longest_edge_length, min_tet_edge_length);
+            }
         }
     }
 
@@ -379,27 +361,56 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
 #endif
 
     // Spatial refinement from end-caps (front then back)
-    if (!baseSub) {
-        for (size_t i = 0; i < 4; i++) sc.capVertsPtr[i] = &sc.tet3DVertsPtr[i]->vert4dList.front();
-        if (refine3DCSG(sc.capVertsPtr, threshold, sc.cellDomFuncIds.front()))
-            try_push_space(spaceQ, baseSub, tid,
-                           sc.longest_edge, sc.longest_edge_length, min_tet_edge_length);
+    std::unordered_set<size_t> capDfIds;
+    capDfIds.insert(0);
+    
+
+    if (!baseSub && !terminate) {
+        // const auto capDfIds = sc.cellDomFuncIds[0];    
+        for(auto dfId : capDfIds)
+        {
+            for (size_t i = 0; i < 4; i++)
+            {
+                sc.capVertsPtr[i] = &sc.baseVertsPtr[i]->vert4dList.front();
+                // sc.polygonVerts[i].coord       = sc.capVertsPtr[i]->coord;
+                // sc.polygonVerts[i].valGradList = std::pair{sc.capVertsPtr[i]->vals[dfId], sc.capVertsPtr[i]->grads.row(dfId)} ; 
+            }
+            // if (refine3D(sc.polygonVerts, threshold))
+            if (refine3DCSG(sc.capVertsPtr, threshold, dfId))
+            {
+                try_push_space(spaceQ, baseSub, tid,
+                    sc.longest_edge, sc.longest_edge_length, min_tet_edge_length);
+                break;
+            }
+        }
     }
-    if (!baseSub) {
-        for (size_t i = 0; i < 4; i++) sc.capVertsPtr[i] = &sc.tet3DVertsPtr[i]->vert4dList.back();
-        if (refine3DCSG(sc.capVertsPtr, threshold, sc.cellDomFuncIds.back()))
-            try_push_space(spaceQ, baseSub, tid,
-                           sc.longest_edge, sc.longest_edge_length, min_tet_edge_length);
+
+    if (!baseSub && !terminate) {
+        // const auto capDfIds = sc.cellDomFuncIds[0];    
+        for(auto dfId : capDfIds)
+        {
+            for (size_t i = 0; i < 4; i++)
+            {
+                sc.capVertsPtr[i] = &sc.baseVertsPtr[i]->vert4dList.back();
+            }
+            if (refine3DCSG(sc.capVertsPtr, threshold, dfId))
+            {
+                try_push_space(spaceQ, baseSub, tid,
+                    sc.longest_edge, sc.longest_edge_length, min_tet_edge_length);
+                break;
+            }
+        }
     }
+    
 
 #if time_profile
     compute_caps_timer.Stop();
     first_part_timer.Stop();
 #endif
 
-    if (no_intersect) terminate = true;
+    if (no_intersect || baseSub) terminate = true;
 
-    terminate = true;
+    // terminate = true;
     if (terminate) return;
 
     // ------------------------------------------------------------------
@@ -412,15 +423,16 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
 #endif
 
     std::array<mtet::Scalar, 12> spatial_verts;
-    collect_spatial_verts(grid, vs, spatial_verts);
+    collect_spatial_verts(grid, tetVids, spatial_verts);
 
     std::unordered_set<size_t> unique_domfIds;
     for (const auto& vec : sc.cellDomFuncIds) {
         unique_domfIds.insert(vec.begin(), vec.end());
     }
+    
     for (auto dfid : unique_domfIds)
     {
-        auto contour            = extract_column_contour(sc.tet3DVertsPtr, spatial_verts, one_column_simp_opt, dfid);
+        auto contour            = extract_column_contour(sc.baseVertsPtr, spatial_verts, one_column_simp_opt, dfid);
         const int num_polyhedra = contour.get_num_polyhedra();
         const int num_vertices  = contour.get_num_vertices();
 
@@ -431,8 +443,8 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
 
         // Cache time lists to avoid repeated getTimeList_f() calls per poly loop
         const std::array<vertexCol::time_list_f, 4> time = {
-            sc.tet3DVertsPtr[0]->getTimeList_f(), sc.tet3DVertsPtr[1]->getTimeList_f(),
-            sc.tet3DVertsPtr[2]->getTimeList_f(), sc.tet3DVertsPtr[3]->getTimeList_f()};
+            sc.baseVertsPtr[0]->getTimeList_f(), sc.baseVertsPtr[1]->getTimeList_f(),
+            sc.baseVertsPtr[2]->getTimeList_f(), sc.baseVertsPtr[3]->getTimeList_f()};
 
         std::vector<mtetcol::Index> vert_id;
         vert_id.reserve(num_vertices);

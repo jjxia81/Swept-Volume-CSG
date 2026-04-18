@@ -49,36 +49,39 @@ bool gridRefine(
     const double min_tet_edge_length);
 
 using CSGFuncs = std::vector<std::function<std::pair<Scalar, Eigen::RowVector4d>(Eigen::RowVector4d)>>;  
+using CSGFunction = std::function<std::pair<double, size_t>(Eigen::RowVectorXd)>;
 
 bool gridRefine2(
     mtet::MTetMesh& grid,
     vertExtrude& vertexMap,
     insidenessMap& insideMap,
     const CSGFuncs& funcs,
+    CSGFunction csg_f,
     const double threshold,
     const double traj_threshold,
     const int max_splits,
     const int insideness_check,
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount,
+    std::unordered_map<uint64_t, int>& colActiveMap,
     size_t initial_time_samples,
     const double min_tet_radius_ratio,
     const double min_tet_edge_length);
 
-bool gridRefineCSG(
-    mtet::MTetMesh& grid,
-    vertExtrude& vertexMap,
-    insidenessMap& insideMap,
-    const std::vector<std::function<std::pair<Scalar, Eigen::RowVector4d>(Eigen::RowVector4d)>>& csg_funcs,
-    const double threshold,
-    const double traj_threshold,
-    const int max_splits,
-    const int insideness_check,
-    std::array<double, timer_amount>& profileTimer,
-    std::array<size_t, timer_amount>& profileCount,
-    size_t initial_time_samples,
-    const double min_tet_radius_ratio,
-    const double min_tet_edge_length);
+// bool gridRefineCSG(
+//     mtet::MTetMesh& grid,
+//     vertExtrude& vertexMap,
+//     insidenessMap& insideMap,
+//     const std::vector<std::function<std::pair<Scalar, Eigen::RowVector4d>(Eigen::RowVector4d)>>& csg_funcs,
+//     const double threshold,
+//     const double traj_threshold,
+//     const int max_splits,
+//     const int insideness_check,
+//     std::array<double, timer_amount>& profileTimer,
+//     std::array<size_t, timer_amount>& profileCount,
+//     size_t initial_time_samples,
+//     const double min_tet_radius_ratio,
+//     const double min_tet_edge_length);
 #endif /* col_gridgen_h */
 
 
@@ -118,3 +121,6 @@ void init5CGridCSG(
 mtet::Scalar calTimeGlobalScaleWithInitGridCSG(vertExtrude& vertexMap);
 
 mtet::Scalar calTimeGlobalScaleWithInitGrid(vertExtrude& vertexMap);
+
+
+uint64_t getTetKeyByVids(const std::span<VertexId, 4>& vs);

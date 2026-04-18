@@ -20,10 +20,10 @@ inline std::pair<Scalar, size_t> csg_fun_min(const RVecX& input)
     return {val, static_cast<size_t>(fid)};
 }
 
-
-
-using CSGFunType = std::pair<Scalar, size_t>(*)(const RVecX&);
+using CSGFunType = std::function<std::pair<Scalar, size_t>(const RVecX&)>;
 inline CSGFunType csg_fun = csg_fun_max;
+
+void set_csg_val_func(CSGFunType csg_f);
 
 
 /// bezier ordinates of a 4D cubic simplex
@@ -112,15 +112,14 @@ inline bool get_sign(const double x)
 }
 
 void adjugate(const Eigen::Matrix<double, 4, 4>& mat, Eigen::Matrix4d& adjugate);
-
-void bezierElev(const Eigen::RowVector<double, 16>& ords, Eigen::RowVector<double, 35>& bezier);
+void bezierElev(const Eigen::RowVector<double, 16>& ords, Eigen::Ref<Eigen::RowVector<double, 35>> bezier);
 
 bool bezierDerOrds(
 const Eigen::RowVector<double, 35>& ords,
 const std::array<Eigen::RowVector4d, 5>& verts,
-Eigen::RowVector<double, 35>& bezierGrad);
+Eigen::Ref<Eigen::RowVector<double, 35>> bezierGrad);
 
-bool outHullClip2D(Eigen::Matrix<double, 2, 35> pts);
+bool outHullClip2D(const Eigen::Matrix<double, 2, 35>& pts);
 
 
 /// Construct the values of one function at the bezier control points within a tet.
@@ -190,7 +189,7 @@ inline bool bezier3D(
 /// @param[in] valList          The eigen vector of 20 bezier values.
 ///
 /// @return         The value differences at 16 control points.
-inline Eigen::Vector<double, 16> bezierDiff(const Eigen::Vector<double, 20> valList)
+inline Eigen::Vector<double, 16> bezierDiff(const Eigen::Vector<double, 20>& valList)
 {
     /// Constant coefficient to obtain linear interpolated values at each bezier control points
     const Eigen::Matrix<double, 16, 4> linear_coeff{
@@ -386,5 +385,5 @@ void getBezier4DDomFuncIds(
     const MatrixX4dRowMajor& g3s,
     const MatrixX4dRowMajor& g4s,
     const MatrixX4dRowMajor& g5s,
-    Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>& bezierCoords,
+    Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierCoords,
     std::vector<size_t>& domFIds);

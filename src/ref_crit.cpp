@@ -8,6 +8,9 @@
 #include "ref_crit.h"
 #include "bezier_simplex.h"
 
+// shared memory definition
+Eigen::Matrix<double, 2, 35> nPoints_eigen_shared;
+
 bool refineFtBezier(
     const std::array<vertex4d*, 5>& verts,
     const double threshold,
@@ -85,9 +88,9 @@ bool refineFt(
 #endif
         return false;
     }
-    Eigen::Matrix<double, 2, 35> nPoints_eigen;
-    nPoints_eigen << bezierVals, bezierGrad;
-    zeroX = !outHullClip2D(nPoints_eigen);
+    // Eigen::Matrix<double, 2, 35> nPoints_eigen_shared;
+    nPoints_eigen_shared << bezierVals, bezierGrad;
+    zeroX = !outHullClip2D(nPoints_eigen_shared);
 #if time_profile
     first_bezier_timer.Stop();
     Timer first_func_timer(first_func, [&](auto timer, auto ms) {
@@ -133,33 +136,34 @@ bool refineFtCSGSingle(
     const std::array<vertex4d*, 5>& verts,
     const double threshold,
     RefineResInfo& refineRes,
-    const Eigen::Ref<Eigen::RowVector<double, 35>> bezierVals,
+    // RefineTetGeoData& refineGeoData,
+    const Eigen::Ref<const Eigen::RowVector<double, 35>> bezierVals,
+    Eigen::Ref<Eigen::RowVector<double, 35>> bezierGrad,
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount)
 {
-
     const auto& p1 = verts[0]->coord;
     const auto& p2 = verts[1]->coord;
     const auto& p3 = verts[2]->coord;
     const auto& p4 = verts[3]->coord;
     const auto& p5 = verts[4]->coord;
-
     if(bezierVals.maxCoeff() * bezierVals.minCoeff() > 0)
     {
         return false;
     }
     refineRes.fZeroX = true;
-
-    Eigen::RowVector<double, 35> bezierGrad;
+    // Eigen::RowVector<double, 35> bezierGrad;
     if (bezierDerOrds(bezierVals, {p1, p2, p3, p4, p5}, bezierGrad)) {
 
         return false;
     }
-    Eigen::Matrix<double, 2, 35> nPoints_eigen;
-    nPoints_eigen << bezierVals, bezierGrad;
-    refineRes.zeroX = !outHullClip2D(nPoints_eigen);
+    // Eigen::Matrix<double, 2, 35> nPoints_eigen_shared;
+    nPoints_eigen_shared << bezierVals, bezierGrad;
+    refineRes.zeroX = !outHullClip2D(nPoints_eigen_shared);
 
+    // need to optimize*, multiple recalculation 
     if (refineRes.zeroX) {
+        // if(! refineGeoData.hasInit) refineGeoData.init();
         auto vec1 = p2 - p1, vec2 = p3 - p1, vec3 = p4 - p1, vec4 = p5 - p1;
         Eigen::Matrix4d vec;
         vec << vec1, vec2, vec3, vec4;
@@ -171,6 +175,7 @@ bool refineFtCSGSingle(
         auto v4 = bezierGrad[3];
         auto v5 = bezierGrad[4];
         Eigen::RowVector4d gradList = Eigen::RowVector4d(v2 - v1, v3 - v1, v4 - v1, v5 - v1) * adj;
+
         Eigen::RowVector<double, 30> error =
             ((bezierGrad.tail(30) - (bezierGrad.head(5) * Bezier4D_ls.bottomRows(30).transpose()) / 3) *
              vec.determinant())
@@ -189,15 +194,34 @@ bool refineFtCSGSingle(
 }
 
 
+// void RefineTetGeoData::init(const std::array<vertex4d*, 5>& verts)
+// {
+//     this->hasInit = true;
+//     const auto& p1 = verts[0]->coord;
+//     const auto& p2 = verts[1]->coord;
+//     const auto& p3 = verts[2]->coord;
+//     const auto& p4 = verts[3]->coord;
+//     const auto& p5 = verts[4]->coord;
+//     auto vec1 = p2 - p1, vec2 = p3 - p1, vec3 = p4 - p1, vec4 = p5 - p1;
+//     Eigen::Matrix4d vec;
+//     vec << vec1, vec2, vec3, vec4;
+//     Eigen::Matrix4d adj;
+//     adjugate(vec, adj);
+//     this->determinant = vec.determinant();
+//     Eigen::RowVector4d gradList = Eigen::RowVector4d(v2 - v1, v3 - v1, v4 - v1, v5 - v1) * adj;
+//     this->gradNorm = gradList.norm();
+// }
+
+
+
 /// See header
-bool refineFtCSG(
+bool calBezierCoordsAndDomFuncIds(
     const std::array<vertex4d*, 5>& verts,
-    const double threshold,
-    bool& choice,
-    bool& zeroX,
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount,
-    std::unordered_set<size_t>& domFuncIds)
+    Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierCoords,
+    std::vector<size_t>& domFIds
+)
 {
     const auto& p1 = verts[0]->coord;
     const auto& p2 = verts[1]->coord;
@@ -216,21 +240,40 @@ bool refineFtCSG(
     const auto& g3s = verts[2]->grads;
     const auto& g4s = verts[3]->grads;
     const auto& g5s = verts[4]->grads;
-    Eigen::Index domf_num = static_cast<Eigen::Index>(v1s.size());
-    Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor> bezierCoords(domf_num, 35);
-    std::vector<size_t> domFIds; 
+    // Eigen::Index domf_num = static_cast<Eigen::Index>(v1s.size());
+    // Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor> bezierCoords(domf_num, 35);
+    // std::vector<size_t> domFIds; 
     getBezier4DDomFuncIds( p1,p2, p3, p4,p5,
     v1s, v2s, v3s, v4s, v5s,
     g1s, g2s, g3s, g4s, g5s, bezierCoords, domFIds);
-    
+    return true;
+}
+
+
+/// See header
+bool refineFtCSG(
+    const std::array<vertex4d*, 5>& verts,
+    const Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierCoords,
+    const std::vector<size_t>& domFIds,
+    const double threshold,
+    bool& choice,
+    bool& zeroX,
+    Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierFtVals,
+    std::array<double, timer_amount>& profileTimer,
+    std::array<size_t, timer_amount>& profileCount,
+    Eigen::Ref<Eigen::Matrix<int, 1, Eigen::Dynamic, Eigen::RowMajor>> domFuncFt0XIds,
+    Eigen::Ref<Eigen::Matrix<int, 1, Eigen::Dynamic, Eigen::RowMajor>> func0XIds)
+{
     Eigen::RowVectorXd ftErrors(domFIds.size());
     std::vector<RefineResInfo> refRes(domFIds.size());
+    RefineTetGeoData refineGeoData;
     bool needRefine = false;
     for(int i = 0; i < int(domFIds.size()); ++i)
     {
         size_t dFid = domFIds[i]; 
         // RefineResInfo ref_res;
-        if(refineFtCSGSingle(verts, threshold, refRes[i], bezierCoords.row(dFid), profileTimer, profileCount))
+        if(refineFtCSGSingle(verts, threshold, refRes[i],  
+                    bezierCoords.row(dFid), bezierFtVals.row(dFid), profileTimer, profileCount))
         {
             ftErrors[i] = refRes[i].error;
             needRefine = true;
@@ -238,8 +281,10 @@ bool refineFtCSG(
         if(refRes[i].zeroX)
         {
             zeroX = refRes[i].zeroX;
-            domFuncIds.insert(size_t(i));
+            domFuncFt0XIds(dFid) = 1;
+            // domFuncIds.insert(size_t(i));
         }
+        func0XIds[dFid] = refRes[i].fZeroX;
     }
     if(needRefine)
     {
@@ -250,6 +295,73 @@ bool refineFtCSG(
     return needRefine;
 }
 
+bool refineEqualSurfaceCSG(
+    const std::array<vertex4d*, 5>& verts,
+    const Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierVals,
+    const Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierFtVals,
+    const double threshold,
+    const std::pair<size_t, size_t>& equalSurfFuncIds,
+    bool& choice,
+    bool& eqaulSurf0X,
+    std::array<double, timer_amount>& profileTimer,
+    std::array<size_t, timer_amount>& profileCount)
+{
+    const auto& p1 = verts[0]->coord;
+    const auto& p2 = verts[1]->coord;
+    const auto& p3 = verts[2]->coord;
+    const auto& p4 = verts[3]->coord;
+    const auto& p5 = verts[4]->coord;
+    eqaulSurf0X = false; 
+
+    const auto& bezier_f1 = bezierVals.row(equalSurfFuncIds.first);
+    // if(bezier_f1.maxCoeff() * bezier_f1.minCoeff() > 0) return false;
+    const auto& bezier_f2 = bezierVals.row(equalSurfFuncIds.second);
+    // if(bezier_f1.maxCoeff() * bezier_f1.minCoeff() > 0) return false;
+
+    auto equalSurfBezier =  bezier_f1 - bezier_f2;
+    if(equalSurfBezier.maxCoeff() * equalSurfBezier.minCoeff() > 0) return false;
+    // Eigen::Matrix<double, 2, 35> nPoints_eigen_shared;
+    nPoints_eigen_shared << equalSurfBezier, bezier_f1;
+    if(outHullClip2D(nPoints_eigen_shared)) return false;
+    nPoints_eigen_shared << equalSurfBezier, bezier_f2;
+    if(outHullClip2D(nPoints_eigen_shared)) return false;
+
+    const auto& bezier_ft1 = bezierFtVals.row(equalSurfFuncIds.first);
+    const auto& bezier_ft2 = bezierFtVals.row(equalSurfFuncIds.second);
+    Eigen::RowVector<double, 35> ftSigns = bezier_ft1.cwiseProduct(bezier_ft2);
+    if(ftSigns.minCoeff() > 0) return false;
+
+    eqaulSurf0X = true;
+    // if(! refineGeoData.hasInit) refineGeoData.init();
+    auto vec1 = p2 - p1, vec2 = p3 - p1, vec3 = p4 - p1, vec4 = p5 - p1;
+    Eigen::Matrix4d vec;
+    vec << vec1, vec2, vec3, vec4;
+    Eigen::Matrix4d adj;
+    adjugate(vec, adj);
+    auto v1 = equalSurfBezier[0];
+    auto v2 = equalSurfBezier[1];
+    auto v3 = equalSurfBezier[2];
+    auto v4 = equalSurfBezier[3];
+    auto v5 = equalSurfBezier[4];
+    Eigen::RowVector4d gradList = Eigen::RowVector4d(v2 - v1, v3 - v1, v4 - v1, v5 - v1) * adj;
+
+    Eigen::RowVector<double, 30> error =
+        ((equalSurfBezier.tail(30) - (equalSurfBezier.head(5) * Bezier4D_ls.bottomRows(30).transpose()) / 3) *
+            vec.determinant())
+            .array()
+            .abs();
+    if (error.maxCoeff() > threshold * gradList.norm()) {
+        Eigen::RowVector<double, 16> topFError = error(topFIndices);
+        Eigen::RowVector<double, 16> botFError = error(botFIndices);
+        choice = std::max(error[3], error[16]) >
+                    std::min(topFError.maxCoeff(), botFError.maxCoeff());
+        // refineRes.error = error.maxCoeff(); 
+        return true;
+    } 
+    return false;
+}
+
+Eigen::RowVector<double, 20> bezierVals3DShared;
 /// See header
 bool refine3D(const std::array<vertex4d, 4>& verts, const double threshold)
 {
@@ -268,8 +380,9 @@ bool refine3D(const std::array<vertex4d, 4>& verts, const double threshold)
     const auto& g3 = verts[2].valGradList.second;
     const auto& g4 = verts[3].valGradList.second;
 
-    Eigen::RowVector<double, 20> bezierVals;
-    if (!bezier3D(p1, p2, p3, p4, v1, v2, v3, v4, g1, g2, g3, g4, bezierVals)) {
+    // Eigen::RowVector<double, 20> bezierVals;
+    bezierVals3DShared.setZero();
+    if (!bezier3D(p1, p2, p3, p4, v1, v2, v3, v4, g1, g2, g3, g4, bezierVals3DShared)) {
         return false;
     };
     Eigen::Vector3d vec1 = p2.head(3) - p1.head(3), vec2 = p3.head(3) - p1.head(3),
@@ -281,56 +394,13 @@ bool refine3D(const std::array<vertex4d, 4>& verts, const double threshold)
     crossMatrix << vec2.cross(vec3), vec3.cross(vec1), vec1.cross(vec2);
     Eigen::Vector3d unNormF =
         Eigen::RowVector3d(v2 - v1, v3 - v1, v4 - v1) * crossMatrix.transpose();
-    double lhs = (bezierDiff(bezierVals) * D).array().abs().maxCoeff();
+    double lhs = (bezierDiff(bezierVals3DShared) * D).array().abs().maxCoeff();
     double rhs = threshold * unNormF.norm();
     if (lhs > rhs) {
         return true;
     }
     return false;
 }
-
-
-// bool refine3DCSG(const std::array<vertex4d*, 4>& verts, const double threshold, size_t csg_fn)
-// {
-//     const auto& p1 = verts[0]->coord;
-//     const auto& p2 = verts[1]->coord;
-//     const auto& p3 = verts[2]->coord;
-//     const auto& p4 = verts[3]->coord;
-
-//     const auto& v1s = verts[0]->vals;
-//     const auto& v2s = verts[1]->vals;
-//     const auto& v3s = verts[2]->vals;
-//     const auto& v4s = verts[3]->vals;
-
-//     const auto& g1s = verts[0]->grads;
-//     const auto& g2s = verts[1]->grads;
-//     const auto& g3s = verts[2]->grads;
-//     const auto& g4s = verts[3]->grads;
-
-//     bool needRefine = false;
-//     for(int fi = 0; fi < csg_fn; ++fi)
-//     {
-//         Eigen::RowVector<double, 20> bezierVals;
-//         if (!bezier3D(p1, p2, p3, p4, v1s[fi], v2s[fi], v3s[fi], v4s[fi], g1s.row(fi), g2s.row(fi), g3s.row(fi), g4s.row(fi), bezierVals)) {
-//             continue;
-//         };
-//         Eigen::Vector3d vec1 = p2.head(3) - p1.head(3), vec2 = p3.head(3) - p1.head(3),
-//                         vec3 = p4.head(3) - p1.head(3);
-//         Eigen::Matrix3d vec;
-//         vec << vec1, vec2, vec3;
-//         double D = vec.determinant();
-//         Eigen::Matrix3d crossMatrix;
-//         crossMatrix << vec2.cross(vec3), vec3.cross(vec1), vec1.cross(vec2);
-//         Eigen::Vector3d unNormF =
-//             Eigen::RowVector3d(v2s[fi] - v1s[fi], v3s[fi] - v1s[fi], v4s[fi] - v1s[fi]) * crossMatrix.transpose();
-//         double lhs = (bezierDiff(bezierVals) * D).array().abs().maxCoeff();
-//         double rhs = threshold * unNormF.norm();
-//         if (lhs > rhs) {
-//             needRefine = true;
-//         }
-//     }
-//     return needRefine;
-// }
 
 
 // Computes edge vectors from the first vertex to the other three
@@ -390,13 +460,13 @@ bool needsRefinementForFunction(
     const Eigen::RowVectorXd& g4,
     double threshold)
 {
-    Eigen::RowVector<double, 20> bezierVals;
-    if (!bezier3D(p1, p2, p3, p4, v1, v2, v3, v4, g1, g2, g3, g4, bezierVals))
+    // Eigen::RowVector<double, 20> bezierVals3DShared;
+    if (!bezier3D(p1, p2, p3, p4, v1, v2, v3, v4, g1, g2, g3, g4, bezierVals3DShared))
         return false;
 
     const Eigen::Vector3d unNormF = computeUnNormF(geom, v1, v2, v3, v4);
 
-    const double lhs = (bezierDiff(bezierVals) * geom.determinant).array().abs().maxCoeff();
+    const double lhs = (bezierDiff(bezierVals3DShared) * geom.determinant).array().abs().maxCoeff();
     const double rhs = threshold * unNormF.norm();
 
     return lhs > rhs;

@@ -20,6 +20,7 @@
 #include <span>
 
 #include "trajectory.h"
+#include "csgFuncs.h"
 
 #define SAVE_CONTOUR 0
 #define batch_stats 0
@@ -131,7 +132,7 @@ int main(int argc, const char* argv[])
         std::string output_path;
         std::string config_file = "";
         std::string function_file = "";
-        double threshold = 0.0005;
+        double threshold = 0.005;
         double traj_threshold = 0.005;
         int max_splits = std::numeric_limits<int>::max();
         int rot = 0;
@@ -177,7 +178,8 @@ int main(int argc, const char* argv[])
     Eigen::MatrixXi F;
     igl::AABB<Eigen::MatrixXd, 3> tree;
     igl::FastWindingNumberBVH fwn_bvh;
-    std::function<std::pair<Scalar, Eigen::RowVector4d>(Eigen::RowVector4d)> implicit_sweep;
+    using FuncType = std::function<std::pair<Scalar, Eigen::RowVector4d>(Eigen::RowVector4d)> ;
+    FuncType implicit_sweep;
     if(args.function_file != "") {
         if (args.function_file.find(".obj") != std::string::npos) {
             igl::read_triangle_mesh(args.function_file, V, F);
@@ -346,8 +348,30 @@ int main(int argc, const char* argv[])
         options.with_snapping = !args.without_snapping;
         options.cyclic = args.cyclic;
     }
+    bool input_csg_funcs = true;
+    std::vector<FuncType> funcs;
+    // sweep::CSGFunction csg_f = csgf::csgf_sphere3d;
+    sweep::CSGFunction csg_f = csgf::csgf_tet;
+    if(input_csg_funcs)
+    {
+        
+        // funcs.push_back(csgf::sphere3d_f1);
+        // funcs.push_back(csgf::sphere3d_f2);
 
-    auto result = sweep::generalized_sweep(implicit_sweep, grid_spec, options);
+        funcs.push_back(csgf::tet_f1);
+        funcs.push_back(csgf::tet_f2);
+        funcs.push_back(csgf::tet_f3);
+        funcs.push_back(csgf::tet_f4);
+        
+        // funcs.push_back(implicit_sweep);
+    } else {
+        funcs.push_back(implicit_sweep);
+    }
+
+    // std::function<std::pair<double, size_t>(Eigen::RowVectorXd)> csg_f = csgf::csgf_sphere3d;  
+    // std::function<std::pair<double, size_t>(Eigen::RowVectorXd)> csg_f;
+
+    auto result = sweep::generalized_sweep(funcs, csg_f, grid_spec, options);
     auto& envelope = result.envelope;
     auto& sweep_surface = result.sweep_surface;
     auto& sweep_arrangement = result.arrangement;

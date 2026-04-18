@@ -24,6 +24,13 @@ struct RefineResInfo{
     double error = 0;
 };
 
+struct RefineTetGeoData{
+    bool hasInit = false;
+    double gradNorm;
+    double determinant;
+    void init(const std::array<vertex4d*, 5>& verts);
+};
+
 
 /// 4D (un-projected) distance check for the time derivative function for a given 4D 5-cell. The default threshold here is 0.01, and it will not change with user's input
 /// @param[in] verts         An array of 5 4D vertices. This vertex4d data structure also stores this vertex value and gradient.
@@ -50,6 +57,40 @@ bool refineFtCSG(
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount,
     std::unordered_set<size_t>& domFuncIds);
+
+bool calBezierCoordsAndDomFuncIds(
+    const std::array<vertex4d*, 5>& verts,
+    std::array<double, timer_amount>& profileTimer,
+    std::array<size_t, timer_amount>& profileCount,
+    Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierCoords,
+    std::vector<size_t>& domFIds
+);
+
+bool refineFtCSG(
+    const std::array<vertex4d*, 5>& verts,
+    const Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierCoords,
+    const std::vector<size_t>& domFIds,
+    const double threshold,
+    bool& choice,
+    bool& zeroX,
+    Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierFtVals,
+    std::array<double, timer_amount>& profileTimer,
+    std::array<size_t, timer_amount>& profileCount,
+    Eigen::Ref<Eigen::Matrix<int, 1, Eigen::Dynamic, Eigen::RowMajor>> domFuncFt0XIds,
+    Eigen::Ref<Eigen::Matrix<int, 1, Eigen::Dynamic, Eigen::RowMajor>> func0XIds);
+
+
+bool refineEqualSurfaceCSG(
+    const std::array<vertex4d*, 5>& verts,
+    const Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierVals,
+    const Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierFtVals,
+    const double threshold,
+    const std::pair<size_t, size_t>& equalSurfFuncIds,
+    bool& choice,
+    bool& eqaulSurf0X,
+    std::array<double, timer_amount>& profileTimer,
+    std::array<size_t, timer_amount>& profileCount);
+
 
 /// Refine critiera that only invokes the bezier computation. This is the samllest testing unit for comparing the run speed across different methods of constructing bezier simplex.
 bool refineFtBezier(

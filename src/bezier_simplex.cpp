@@ -56,15 +56,15 @@ void adjugate(const Eigen::Matrix<double, 4, 4>& mat, Eigen::Matrix4d& adjugate)
 /// @param[out] bezier      The 35 elevated Bezier control ordinates for the cubic Bezier simplex.
 ///                         These ordinates are computed by applying the linear transformation defined by `elevMatrix`
 ///                         and `ls`, followed by normalization.
-void bezierElev(const Eigen::RowVector<double, 16>& ords, Eigen::RowVector<double, 35>& bezier)
+void bezierElev(const Eigen::RowVector<double, 16>& ords, Eigen::Ref<Eigen::RowVector<double, 35>> bezierVals)
 {
     Eigen::Vector<double, 5> elevRow;
     for (size_t i = 0; i < 35; i++) {
         elevRow << ords[elevMatrix[i][0]], ords[elevMatrix[i][1]], ords[elevMatrix[i][2]],
             ords[elevMatrix[i][3]], ords[elevMatrix[i][4]];
-        bezier[i] = Bezier4D_ls.row(i).dot(elevRow);
+        bezierVals[i] = Bezier4D_ls.row(i).dot(elevRow);
     }
-    bezier = bezier / 3.0;
+    bezierVals = bezierVals / 3.0;
 }
 
 /// Compute the elevated Bezier control ordinates for the directional derivative of a cubic (order-3)
@@ -83,7 +83,7 @@ void bezierElev(const Eigen::RowVector<double, 16>& ords, Eigen::RowVector<doubl
 bool bezierDerOrds(
     const Eigen::RowVector<double, 35>& ords,
     const std::array<Eigen::RowVector4d, 5>& verts,
-    Eigen::RowVector<double, 35>& bezierGrad)
+    Eigen::Ref<Eigen::RowVector<double, 35>> bezierGrad)
 {
     Eigen::RowVector<double, 16> vals;
     double norm = (verts[0] - verts[4]).norm();
@@ -117,7 +117,7 @@ bool bezierDerOrds(
 /// @note                   Robustness control: uses a small epsilon (1e-7) to handle near-collinear cases and ties by
 ///                         falling back to an orientation test via a perpendicular vector.
 ///                         The helper `perp(v) = (-v_y, v_x)` rotates vectors by +90°.
-bool outHullClip2D(Eigen::Matrix<double, 2, 35> pts)
+bool outHullClip2D(const Eigen::Matrix<double, 2, 35>& pts)
 {
     constexpr double eps = 0.0000001;
     bool r1, r2;
@@ -157,6 +157,11 @@ bool outHullClip2D(Eigen::Matrix<double, 2, 35> pts)
     return true;
 }
 
+void set_csg_val_func(CSGFunType csg_f)
+{
+    csg_fun = csg_f;
+}
+
 void getBezier4DDomFuncIds(
     const Eigen::RowVector4d& p1,
     const Eigen::RowVector4d& p2,
@@ -173,7 +178,7 @@ void getBezier4DDomFuncIds(
     const MatrixX4dRowMajor& g3s,
     const MatrixX4dRowMajor& g4s,
     const MatrixX4dRowMajor& g5s,
-    Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>& bezierCoords,
+    Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierCoords,
     std::vector<size_t>& domFIds)
 {
     Eigen::Index domf_num = static_cast<Eigen::Index>(v1s.size());

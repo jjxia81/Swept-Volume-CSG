@@ -32,6 +32,10 @@ size_t calRefinedGridSampleNumber(vertExtrude& vertexMap)
     return total_sample_number;
 }
 
+
+
+
+
 std::tuple<
     std::vector<Scalar>,
     std::vector<Index>,
@@ -56,11 +60,11 @@ refine_grid(const SpaceTimeFunction& f, mtet::MTetMesh& grid, const SweepOptions
     spdlog::set_level(spdlog::level::off);
     std::vector<SpaceTimeFunction>  funcs;
     funcs.push_back(f);
-    if (!gridRefine2(
+    if (!gridRefine(
             grid,
             vertexMap,
             insideMap,
-            funcs,
+            f,
             options.epsilon_env,
             options.epsilon_sil,
             options.max_split,
@@ -83,6 +87,72 @@ refine_grid(const SpaceTimeFunction& f, mtet::MTetMesh& grid, const SweepOptions
     std::vector<std::vector<double>> time;
     std::vector<std::vector<double>> values;
     convert_4d_grid_mtetcol(grid, vertexMap, verts, simps, time, values, cyclic);
+
+    return {verts, simps, time, values};
+}
+
+
+std::tuple<
+    std::vector<Scalar>,
+    std::vector<Index>,
+    std::vector<std::vector<Scalar>>,
+    std::vector<std::vector<Scalar>>>
+refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs, 
+    CSGFunction csg_f,
+    mtet::MTetMesh& grid, const SweepOptions& options)
+{
+    logger().info("Adaptively refine the background grid...");
+
+    // TODO: investigate why saving and loading is necessary here???
+    mtet::save_mesh("init.msh", grid);
+    grid = mtet::load_mesh("init.msh");
+    std::filesystem::remove("init.msh");
+
+    vertExtrude vertexMap;
+    insidenessMap insideMap;
+    std::unordered_map<uint64_t, int> tetActiveMap;
+
+    // TODO: Clarify the purpose of these timers and whether they're still
+    // needed.
+    std::array<double, timer_amount> profileTimer{};
+    std::array<size_t, timer_amount> profileCount{};
+    spdlog::set_level(spdlog::level::off);
+    // std::vector<SpaceTimeFunction>  funcs;
+    // funcs.push_back(f);
+    if (!gridRefine2(
+            grid,
+            vertexMap,
+            insideMap,
+            csg_funcs,
+            csg_f,
+            options.epsilon_env,
+            options.epsilon_sil,
+            options.max_split,
+            options.with_insideness_check,
+            profileTimer,
+            profileCount,
+            tetActiveMap,
+            options.initial_time_samples,
+            options.min_tet_radius_ratio,
+            options.min_tet_edge_length)) {
+        throw std::runtime_error("ERROR: grid generation failed");
+    };
+
+    spdlog::set_level(spdlog::level::info);
+    size_t total_sample_number = calRefinedGridSampleNumber(vertexMap);
+    sweep::logger().info("--Total sample number {}", total_sample_number);
+
+    bool cyclic = options.cyclic;
+    std::vector<mtetcol::Scalar> verts;
+    std::vector<mtetcol::Index> simps;
+    std::vector<int> tetActiveTags;
+    std::vector<std::vector<double>> time;
+    std::vector<std::vector<double>> values;
+    
+    convert_4d_grid_mtetcol(grid, vertexMap, tetActiveMap, verts, simps, tetActiveTags, time, values, cyclic);
+
+    std::string outpath = "/home/jjxia/Documents/projects/Swept-Volume-CSG/output/output_grid.m"; 
+    export_to_mathematica(outpath, verts, simps, tetActiveTags, time); 
 
     return {verts, simps, time, values};
 }
@@ -285,7 +355,9 @@ void load_config(std::filesystem::path config_path,
     }
 }
 
-SweepResult generalized_sweep(const SpaceTimeFunction& f, GridSpec grid_spec, SweepOptions options)
+SweepResult generalized_sweep(const std::vector<SpaceTimeFunction>& funcs, 
+        CSGFunction csg_f, 
+        GridSpec grid_spec, SweepOptions options)
 {
     log_config(grid_spec, options);
 
@@ -304,15 +376,27 @@ SweepResult generalized_sweep(const SpaceTimeFunction& f, GridSpec grid_spec, Sw
     std::vector<std::vector<double>> values;
 
     if (options.with_adaptive_refinement) {
-        auto refine_start = std::chrono::high_resolution_clock::now();
-        std::tie(verts, simps, time, values) = refine_grid(f, grid, options);
-        auto refine_end = std::chrono::high_resolution_clock::now();
-        logger().info(
-            "Grid refinement time: {} seconds",
-            std::chrono::duration<double>(refine_end - refine_start).count());
+        if(options.with_csg_funcs)
+        {
+            auto refine_start = std::chrono::high_resolution_clock::now();
+            std::tie(verts, simps, time, values) = refine_grid_csg(funcs, csg_f, grid, options);
+            auto refine_end = std::chrono::high_resolution_clock::now();
+            logger().info(
+                "Grid refinement time: {} seconds",
+                std::chrono::duration<double>(refine_end - refine_start).count());
+
+        } else {
+            auto refine_start = std::chrono::high_resolution_clock::now();
+            std::tie(verts, simps, time, values) = refine_grid(funcs[0], grid, options);
+            auto refine_end = std::chrono::high_resolution_clock::now();
+            logger().info(
+                "Grid refinement time: {} seconds",
+                std::chrono::duration<double>(refine_end - refine_start).count());
+        }
+        
     } else {
         auto evaluate_start = std::chrono::high_resolution_clock::now();
-        std::tie(verts, simps, time, values) = evaluate_grid(f, grid, options);
+        std::tie(verts, simps, time, values) = evaluate_grid(funcs[0], grid, options);
         auto evaluate_end = std::chrono::high_resolution_clock::now();
         logger().info(
             "Grid evaluation time: {} seconds",
@@ -344,7 +428,7 @@ SweepResult generalized_sweep(const SpaceTimeFunction& f, GridSpec grid_spec, Sw
     }
 
     auto envelope_start = std::chrono::high_resolution_clock::now();
-    result.envelope = compute_envelope(f, contour, options);
+    result.envelope = compute_envelope(funcs[0], contour, options);
     auto envelope_end = std::chrono::high_resolution_clock::now();
     logger().info(
         "Envelope computation time: {} seconds",
@@ -394,7 +478,11 @@ SweepResult generalized_sweep_from_config(
         return {val, {grad[0], grad[1], grad[2], grad[3]}};
     };
 
-    return generalized_sweep(implicit_sweep, grid_spec, options);
+    std::vector<SpaceTimeFunction> funcs;
+    funcs.push_back(implicit_sweep);
+    CSGFunction temp_csg_f; 
+
+    return generalized_sweep(funcs, temp_csg_f, grid_spec, options);
 }
 
 } // namespace sweep

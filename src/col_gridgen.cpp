@@ -6,7 +6,6 @@
 //
 // #define only_stage1
 #include <functional> // std::reference_wrapper, std::ref
-
 #include <sweep/logger.h>
 #include "col_gridgen.h"
 

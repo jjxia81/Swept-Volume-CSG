@@ -40,7 +40,7 @@ public:
     Eigen::RowVector4d coord;
     funcVGrad valGradList;
     Eigen::RowVectorXd vals; 
-    std::vector<funcVGrad> funcVGrads;
+    // std::vector<funcVGrad> funcVGrads;
     MatrixX4dRowMajor grads;
     // std::vector<std::pair<Scalar, Eigen::RowVector4d>> valGradListCSG;
     vertex4d() = default;
@@ -52,10 +52,18 @@ public:
         , coord(c)
         , valGradList(vg)
     {}
-    vertex4d(size_t fNum) : domfNum(fNum), vals(fNum), grads(fNum, 4), funcVGrads(fNum){
-        vals.setZero();
-        grads.setZero();
-    }
+    // vertex4d(size_t fNum) : domfNum(fNum), vals(fNum), grads(fNum, 4){
+    //     vals.setZero();
+    //     grads.setZero();
+    // }
+    vertex4d(size_t fNum) 
+    : domfNum(fNum)
+    , time(0)
+    , coord(Eigen::RowVector4d::Zero())
+    , valGradList({0.0, Eigen::RowVector4d::Zero()})
+    , vals(Eigen::RowVectorXd::Zero(fNum))
+    , grads(MatrixX4dRowMajor::Zero(fNum, 4))
+    {}
     ~vertex4d() = default;
 };
 
@@ -145,6 +153,7 @@ public:
     vert4d_list vert4dList;
     ankerl::unordered_dense::map<int, bool> timeExist;
     vertToSimp vertTetAssoc;
+    bool isActive = false;
 
     vertexCol() = default;
 
@@ -185,6 +194,24 @@ public:
         value_list valList(vert4dList.size());
         for (size_t i = 0; i < vert4dList.size(); i++) {
             valList[i] = vert4dList[i].valGradList.second[3];
+        }
+        return valList;
+    }
+
+    value_list getValueList(const size_t funcId) const
+    {
+        value_list valList(vert4dList.size());
+        for (size_t i = 0; i < vert4dList.size(); i++) {
+            valList[i] = vert4dList[i].vals(funcId);
+        }
+        return valList;
+    }
+
+    value_list getEFValueList(const size_t funcId1, const size_t funcId2) const
+    {
+        value_list valList(vert4dList.size());
+        for (size_t i = 0; i < vert4dList.size(); i++) {
+            valList[i] = vert4dList[i].vals(funcId1) - vert4dList[i].vals(funcId2);
         }
         return valList;
     }

@@ -25,6 +25,7 @@ using Index = uint32_t;
 using SpaceTimeFunction =
     std::function<std::pair<double, Eigen::RowVector4d>(Eigen::RowVector4d)>;
 
+using CSGFunction = std::function<std::pair<double, size_t>(Eigen::RowVectorXd)>;
 ///
 /// Specification for the 3D spatial grid used in the sweep.
 ///
@@ -32,11 +33,18 @@ struct GridSpec {
     /// Resolution of the grid in the x, y, z directions.
     std::array<size_t, 3> resolution = {4, 4, 4};
 
+    // range = {{-.5, 1.5}, {-.75, .75}, {-.75, .75}, {0, 1}};
     /// Axis-aligned bounding box minimum corner.
-    std::array<float, 3> bbox_min = {-0.2f, -0.2f, -0.2f};
-
+    // std::array<float, 3> bbox_min = {-0.2f, -0.2f, -0.2f};
     /// Axis-aligned bounding box maximum corner.
-    std::array<float, 3> bbox_max = {1.2f, 1.2f, 1.2f};
+    // std::array<float, 3> bbox_max = {1.2f, 1.2f, 1.2f};
+
+    // two sphere range
+    // std::array<float, 3> bbox_min = {-0.5f, -0.75f, -0.75f};
+    // std::array<float, 3> bbox_max = {1.5f, 0.75f, 0.75f};
+    // tet mesh range
+    std::array<float, 3> bbox_min = {-1.0f, -1.0f, -1.0f};
+    std::array<float, 3> bbox_max = {3.0f, 1.0f, 1.2f};
 };
 
 ///
@@ -112,6 +120,9 @@ struct SweepOptions {
     /// Adaptively refine the input grid based on the implicit function.
     bool with_adaptive_refinement = true;
 
+    /// The input implicit functions are csg functions.
+    bool with_csg_funcs = true;
+
     /// Number of initial uniform time samples per spatial grid vertex.
     size_t initial_time_samples = 8;
 
@@ -123,7 +134,8 @@ struct SweepOptions {
     /// Minimum acceptable tetrahedron edge length during grid refinement.
     ///
     /// Tets with longest edge length below this threshold will not be refined further.
-    Scalar min_tet_edge_length = 2e-5;
+    // Scalar min_tet_edge_length = 2e-5;
+    Scalar min_tet_edge_length = 2e-2;
 };
 
 ///
@@ -136,7 +148,8 @@ struct SweepOptions {
 /// @return          The result of the generalized sweep, including the envelope mesh,
 ///                  the arrangement mesh, and the final sweep surface.
 ///
-SweepResult generalized_sweep(const SpaceTimeFunction& f,
+SweepResult generalized_sweep(const std::vector<SpaceTimeFunction>& funcs,
+                              CSGFunction csg_f,
                               GridSpec grid_spec = {},
                               SweepOptions options = {});
 

@@ -52,6 +52,85 @@ void convert_4d_grid_col(
     });
 }
 
+uint64_t getTetKeyByVidsIO(const std::span<VertexId, 4>& vs)
+{
+    std::array<uint64_t, 4> ids = {value_of(vs[0]), value_of(vs[1]), value_of(vs[2]), value_of(vs[3])};
+    std::sort(ids.begin(), ids.end());
+    // combine into single hash
+    uint64_t key = ids[0];
+    key ^= ids[1] + 0x9e3779b9 + (key << 6) + (key >> 2);
+    key ^= ids[2] + 0x9e3779b9 + (key << 6) + (key >> 2);
+    key ^= ids[3] + 0x9e3779b9 + (key << 6) + (key >> 2);
+    return key;
+}
+
+void convert_4d_grid_mtetcol(
+    mtet::MTetMesh grid,
+    vertExtrude vertexMap,
+    std::unordered_map<uint64_t, int>& activeColMap,
+    std::vector<double>& verts,
+    std::vector<uint32_t>& simps,
+    std::vector<int>& tetActiveTags,
+    std::vector<std::vector<double>>& time,
+    std::vector<std::vector<double>>& values,
+    bool cyclic)
+{
+    size_t vert_num = grid.get_num_vertices();
+    size_t tet_num = grid.get_num_tets();
+    size_t tet4d_num = 0, vert4d_num = 0;
+    verts.reserve(vert_num * 3);
+    simps.reserve(tet_num * 4);
+    tetActiveTags.reserve(tet_num);
+    time.reserve(vert_num);
+    values.reserve(vert_num);
+    size_t vertIt = 0;
+    using IndexMap = ankerl::unordered_dense::map<uint64_t, size_t>;
+    IndexMap ind4DMap;
+    grid.seq_foreach_vertex([&](VertexId vid, std::span<const Scalar, 3> data) {
+        verts.emplace_back(static_cast<double>(data[0]));
+        verts.emplace_back(static_cast<double>(data[1]));
+        verts.emplace_back(static_cast<double>(data[2]));
+        vertexCol::vert4d_list vert4dList = vertexMap[value_of(vid)].vert4dList;
+        ind4DMap[value_of(vid)] = vertIt;
+        values.emplace_back(std::vector<double>{});
+        time.emplace_back(std::vector<double>{});
+        values[vertIt].reserve(vert4dList.size());
+        time[vertIt].reserve(vert4dList.size());
+        vert4d_num += vert4dList.size();
+        for (size_t i = 0; i < vert4dList.size(); i++) {
+            Eigen::RowVector4d coord = vert4dList[i].coord;
+            values[vertIt].emplace_back(vert4dList[i].valGradList.second[3]);
+            time[vertIt].emplace_back(vert4dList[i].coord(3));
+        }
+        if (cyclic) {
+            values[vertIt].back() = values[vertIt].front();
+        }
+        vertIt++;
+    });
+
+    grid.seq_foreach_tet([&](TetId tid, [[maybe_unused]] std::span<const VertexId, 4> data) {
+        std::span<VertexId, 4> vs = grid.get_tet(tid);
+        simps.emplace_back(static_cast<uint32_t>(ind4DMap[value_of(vs[0])]));
+        simps.emplace_back(static_cast<uint32_t>(ind4DMap[value_of(vs[1])]));
+        simps.emplace_back(static_cast<uint32_t>(ind4DMap[value_of(vs[2])]));
+        simps.emplace_back(static_cast<uint32_t>(ind4DMap[value_of(vs[3])]));
+       
+        auto tetKey = getTetKeyByVidsIO(vs);
+        auto it = activeColMap.find(tetKey);
+        int tetActiveVal = (it != activeColMap.end()) ? it->second : 0;
+        tetActiveTags.push_back(tetActiveVal); 
+        tet4d_num += vertexMap[value_of(vs[0])].vert4dList.size();
+        tet4d_num += vertexMap[value_of(vs[1])].vert4dList.size();
+        tet4d_num += vertexMap[value_of(vs[2])].vert4dList.size();
+        tet4d_num += vertexMap[value_of(vs[3])].vert4dList.size();
+        tet4d_num -= 4;
+    });
+
+    sweep::logger().info("4D Vertex Number: {} 4D Tetrahedra Number: {}", vert4d_num, tet4d_num);
+}
+
+
+
 void convert_4d_grid_mtetcol(
     mtet::MTetMesh grid,
     vertExtrude vertexMap,
@@ -106,6 +185,10 @@ void convert_4d_grid_mtetcol(
     });
     sweep::logger().info("4D Vertex Number: {} 4D Tetrahedra Number: {}", vert4d_num, tet4d_num);
 }
+
+
+
+
 mshio::MshSpec generate_spec(const Eigen::MatrixXd& V, const Eigen::MatrixXi& F, TimeMap timeMap)
 {
     size_t num_vertices = V.rows();
@@ -315,4 +398,71 @@ void save_grid_for_mathematica(
         fout << jOut.dump(4, ' ', true, json::error_handler_t::replace) << std::endl;
     }
     /// End of Mathematica output
+}
+
+void export_to_mathematica(
+    const std::string& filename,
+    const std::vector<double>& verts,
+    const std::vector<uint32_t>& simps,
+    const std::vector<int>& activeTags,
+    const std::vector<std::vector<double>>& time)
+{
+    std::ofstream f(filename);
+    f << std::setprecision(16);
+
+    // verts: flat list of xyz, output as {{x,y,z},{x,y,z},...}
+    f << "verts = {";
+    for (size_t i = 0; i < verts.size(); i += 3) {
+        f << "{" << verts[i] << "," << verts[i+1] << "," << verts[i+2] << "}";
+        if (i + 3 < verts.size()) f << ",";
+    }
+    f << "};\n";
+
+    // simps: flat list of indices, output as {{a,b,c,d},...}
+    f << "simps = {";
+    for (size_t i = 0; i < simps.size(); i += 4) {
+        // +1 for Mathematica 1-based indexing
+        f << "{" << simps[i]+1 << "," << simps[i+1]+1 << "," << simps[i+2]+1 << "," << simps[i+3]+1 << "}";
+        if (i + 4 < simps.size()) f << ",";
+    }
+    f << "};\n";
+
+    // time: list of lists
+    f << "time = {";
+    for (size_t i = 0; i < time.size(); i++) {
+        f << "{";
+        for (size_t j = 0; j < time[i].size(); j++) {
+            f << time[i][j];
+            if (j + 1 < time[i].size()) f << ",";
+        }
+        f << "}";
+        if (i + 1 < time.size()) f << ",";
+    }
+    f << "};\n";
+
+    // simps: flat list of indices, output as {{a,b,c,d},...}
+    f << "activeTags = {";
+    for (size_t i = 0; i < activeTags.size(); ++i ) {
+        // +1 for Mathematica 1-based indexing
+        if( i == activeTags.size() - 1)
+        {
+            f << activeTags[i];
+        } else {
+            f << activeTags[i] << ",";
+        }
+    }
+    f << "};\n";
+
+    // values: list of lists
+    // f << "values = {";
+    // for (size_t i = 0; i < values.size(); i++) {
+    //     f << "{";
+    //     for (size_t j = 0; j < values[i].size(); j++) {
+    //         f << values[i][j];
+    //         if (j + 1 < values[i].size()) f << ",";
+    //     }
+    //     f << "}";
+    //     if (i + 1 < values.size()) f << ",";
+    // }
+    // f << "};\n";
 }

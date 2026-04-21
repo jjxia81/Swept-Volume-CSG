@@ -97,6 +97,19 @@ target_link_libraries(generalized_sweep
         # OpenMP::OpenMP_CXX
 )
 
+# On Windows there is no RPATH, so shared-library dependencies (e.g. nanothread.dll)
+# must sit next to the executable at runtime. Copy all runtime DLLs alongside the
+# exe after every build. No-op on Linux/macOS, where it evaluates to an empty list.
+if(WIN32)
+    add_custom_command(TARGET generalized_sweep POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_RUNTIME_DLLS:generalized_sweep>
+            $<TARGET_FILE_DIR:generalized_sweep>
+        COMMAND_EXPAND_LISTS
+        VERBATIM
+    )
+endif()
+
 option(GEN_SWEEP_TESTS "general sweep unit tests" OFF)
 if (GEN_SWEEP_TESTS)
  include(CTest)
@@ -131,6 +144,16 @@ target_compile_definitions(
     -DEXAMPLE_DIR="${CMAKE_CURRENT_LIST_DIR}/example"
 )
  catch_discover_tests(sweep_volume_test)
+
+ if(WIN32)
+     add_custom_command(TARGET sweep_volume_test POST_BUILD
+         COMMAND ${CMAKE_COMMAND} -E copy_if_different
+             $<TARGET_RUNTIME_DLLS:sweep_volume_test>
+             $<TARGET_FILE_DIR:sweep_volume_test>
+         COMMAND_EXPAND_LISTS
+         VERBATIM
+     )
+ endif()
 endif()
 
 if (SWEEP_PYTHON_BINDING)

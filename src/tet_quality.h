@@ -27,6 +27,8 @@ const std::array<std::string, 6> tet_metric_labels = {
 double tet_radius_ratio(const std::array<std::valarray<double>, 4>& pts);
 
 
+double tet_radius_ratio(const std::array<Eigen::RowVector3d, 4>& pts);
+
 double dot(const std::valarray<double>& a, const std::valarray<double>& b);
 
 /// returns the normalized vector of the input array `a` where it represents a vector in 3D.

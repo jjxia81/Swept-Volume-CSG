@@ -119,6 +119,11 @@ const Eigen::RowVector<double, 35>& ords,
 const std::array<Eigen::RowVector4d, 5>& verts,
 Eigen::Ref<Eigen::RowVector<double, 35>> bezierGrad);
 
+void bezierDerOrdsForFtVals(
+    const Eigen::RowVector<double, 35>& ords,
+    const std::array<Eigen::RowVector4d, 5>& verts,
+    Eigen::Ref<Eigen::RowVector<double, 35>> bezierGrad);
+
 bool outHullClip2D(const Eigen::Matrix<double, 2, 35>& pts);
 
 
@@ -387,3 +392,14 @@ void getBezier4DDomFuncIds(
     const MatrixX4dRowMajor& g5s,
     Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierCoords,
     std::vector<size_t>& domFIds);
+
+
+inline bool isInside(const Eigen::Ref<const Eigen::RowVector<double, 35>> bezierVals)
+{
+    bool botInside = bezierVals({0, 1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15, 17, 18, 19, 25, 26, 28, 31})
+                          .maxCoeff() <= 0;
+    bool topInside =
+             bezierVals({1, 2, 3, 4, 10, 11, 12, 14, 15, 16, 18, 19, 20, 22, 23, 24, 31, 32, 33, 34})
+                     .maxCoeff() <= 0;
+    return botInside || topInside;
+}

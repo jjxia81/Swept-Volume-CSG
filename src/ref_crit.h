@@ -62,18 +62,20 @@ bool calBezierCoordsAndDomFuncIds(
     const std::array<vertex4d*, 5>& verts,
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount,
-    Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierCoords,
+    Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>& bezierCoords,
+    Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>& bezierFtVals,
     std::vector<size_t>& domFIds
 );
 
 bool refineFtCSG(
     const std::array<vertex4d*, 5>& verts,
-    const Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierCoords,
+    const Eigen::Ref<const Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierCoords,
+    const Eigen::Ref<const Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierFtVals,
     const std::vector<size_t>& domFIds,
     const double threshold,
     bool& choice,
+    bool& inside,
     bool& zeroX,
-    Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierFtVals,
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount,
     Eigen::Ref<Eigen::Matrix<int, 1, Eigen::Dynamic, Eigen::RowMajor>> domFuncFt0XIds,

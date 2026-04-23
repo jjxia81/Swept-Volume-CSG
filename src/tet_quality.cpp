@@ -75,3 +75,35 @@ double tet_radius_ratio(const std::array<std::valarray<double>, 4>& pts)
     const double radius_ratio = (108 * volume * volume) / (norm(numerator) * area_sum);
     return radius_ratio;
 }
+
+
+double tet_radius_ratio(const std::array<Eigen::RowVector3d, 4>& pts)
+{
+    Eigen::RowVector3d s0 = pts[1] - pts[0];
+    Eigen::RowVector3d s1 = pts[2] - pts[1];
+    Eigen::RowVector3d s2 = pts[0] - pts[2];
+    Eigen::RowVector3d s3 = pts[3] - pts[0];
+    Eigen::RowVector3d s4 = pts[3] - pts[1];
+    Eigen::RowVector3d s5 = pts[3] - pts[2];
+
+    // Numerator vector (circumradius numerator)
+    Eigen::RowVector3d numerator =
+        s3.dot(s3) * s2.cross(s0) +
+        s2.dot(s2) * s3.cross(s0) +
+        s0.dot(s0) * s3.cross(s2);
+
+    // Face areas
+    double area_sum = (s2.cross(s0).norm() +
+                       s3.cross(s0).norm() +
+                       s4.cross(s1).norm() +
+                       s3.cross(s2).norm()) * 0.5;
+
+    // Signed volume
+    double volume = (pts[0] - pts[3]).dot(
+                        (pts[1] - pts[3]).cross(pts[2] - pts[3])) / 6.0;
+
+    if (std::abs(volume) < 1e-14 || area_sum < 1e-14) return 0.0;
+
+    const double radius_ratio = (108.0 * volume * volume) / (numerator.norm() * area_sum);
+    return radius_ratio;
+}

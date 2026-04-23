@@ -138,7 +138,8 @@ bool refineFtCSGSingle(
     RefineResInfo& refineRes,
     // RefineTetGeoData& refineGeoData,
     const Eigen::Ref<const Eigen::RowVector<double, 35>> bezierVals,
-    Eigen::Ref<Eigen::RowVector<double, 35>> bezierGrad,
+    const Eigen::Ref<const Eigen::RowVector<double, 35>> bezierFtVals,
+    bool& inside,
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount)
 {
@@ -147,18 +148,29 @@ bool refineFtCSGSingle(
     const auto& p3 = verts[2]->coord;
     const auto& p4 = verts[3]->coord;
     const auto& p5 = verts[4]->coord;
+
+    if(isInside(bezierVals))
+    {
+        inside = true;
+        return false;
+    }
+
     if(bezierVals.maxCoeff() * bezierVals.minCoeff() > 0)
     {
         return false;
     }
     refineRes.fZeroX = true;
-    // Eigen::RowVector<double, 35> bezierGrad;
-    if (bezierDerOrds(bezierVals, {p1, p2, p3, p4, p5}, bezierGrad)) {
-
+    // bezierFtValsShared
+    // if (bezierDerOrds(bezierVals, vertsArray, bezierGrad_temp)) {
+    //     // bezierGrad = bezierGrad_temp;
+    //     return false;
+    // }
+    if(bezierFtVals.maxCoeff() * bezierFtVals.minCoeff() > 0)
+    {
         return false;
     }
     // Eigen::Matrix<double, 2, 35> nPoints_eigen_shared;
-    nPoints_eigen_shared << bezierVals, bezierGrad;
+    nPoints_eigen_shared << bezierVals, bezierFtVals;
     refineRes.zeroX = !outHullClip2D(nPoints_eigen_shared);
 
     // need to optimize*, multiple recalculation 
@@ -169,15 +181,15 @@ bool refineFtCSGSingle(
         vec << vec1, vec2, vec3, vec4;
         Eigen::Matrix4d adj;
         adjugate(vec, adj);
-        auto v1 = bezierGrad[0];
-        auto v2 = bezierGrad[1];
-        auto v3 = bezierGrad[2];
-        auto v4 = bezierGrad[3];
-        auto v5 = bezierGrad[4];
+        auto v1 = bezierFtVals[0];
+        auto v2 = bezierFtVals[1];
+        auto v3 = bezierFtVals[2];
+        auto v4 = bezierFtVals[3];
+        auto v5 = bezierFtVals[4];
         Eigen::RowVector4d gradList = Eigen::RowVector4d(v2 - v1, v3 - v1, v4 - v1, v5 - v1) * adj;
 
         Eigen::RowVector<double, 30> error =
-            ((bezierGrad.tail(30) - (bezierGrad.head(5) * Bezier4D_ls.bottomRows(30).transpose()) / 3) *
+            ((bezierFtVals.tail(30) - (bezierFtVals.head(5) * Bezier4D_ls.bottomRows(30).transpose()) / 3) *
              vec.determinant())
                 .array()
                 .abs();
@@ -219,7 +231,8 @@ bool calBezierCoordsAndDomFuncIds(
     const std::array<vertex4d*, 5>& verts,
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount,
-    Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierCoords,
+    Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>& bezierCoords,
+    Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>& bezierFtVals,
     std::vector<size_t>& domFIds
 )
 {
@@ -246,6 +259,20 @@ bool calBezierCoordsAndDomFuncIds(
     getBezier4DDomFuncIds( p1,p2, p3, p4,p5,
     v1s, v2s, v3s, v4s, v5s,
     g1s, g2s, g3s, g4s, g5s, bezierCoords, domFIds);
+    std::array<Eigen::RowVector4d, 5> tet_verts{p1, p2, p3, p4, p5};
+
+    size_t n_rows = bezierCoords.rows();
+    
+    for(auto df_id : domFIds)
+    {
+        if(df_id < n_rows)
+        {
+            // bezierFtVals.row(df_id) = bezierCoords.row(df_id);
+            bezierDerOrdsForFtVals(bezierCoords.row(df_id), tet_verts, bezierFtVals.row(df_id));
+        } else {
+            std::cout << " abnormal dom f id : " << df_id << std::endl;
+        }
+    }
     return true;
 }
 
@@ -253,12 +280,13 @@ bool calBezierCoordsAndDomFuncIds(
 /// See header
 bool refineFtCSG(
     const std::array<vertex4d*, 5>& verts,
-    const Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierCoords,
+    const Eigen::Ref<const Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierCoords,
+    const Eigen::Ref<const Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierFtVals,
     const std::vector<size_t>& domFIds,
     const double threshold,
     bool& choice,
+    bool& inside,
     bool& zeroX,
-    Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierFtVals,
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount,
     Eigen::Ref<Eigen::Matrix<int, 1, Eigen::Dynamic, Eigen::RowMajor>> domFuncFt0XIds,
@@ -268,16 +296,22 @@ bool refineFtCSG(
     std::vector<RefineResInfo> refRes(domFIds.size());
     RefineTetGeoData refineGeoData;
     bool needRefine = false;
+    inside = true;
+    
     for(int i = 0; i < int(domFIds.size()); ++i)
     {
         size_t dFid = domFIds[i]; 
+
+        // std::cout << " dfid " << dFid << std::endl;
         // RefineResInfo ref_res;
+        bool inside_cur_domf = false;
         if(refineFtCSGSingle(verts, threshold, refRes[i],  
-                    bezierCoords.row(dFid), bezierFtVals.row(dFid), profileTimer, profileCount))
+                    bezierCoords.row(dFid), bezierFtVals.row(dFid), inside_cur_domf, profileTimer, profileCount))
         {
             ftErrors[i] = refRes[i].error;
             needRefine = true;
         }
+        inside = inside && inside_cur_domf;
         if(refRes[i].zeroX)
         {
             zeroX = refRes[i].zeroX;

@@ -71,4 +71,11 @@ void export_to_mathematica(
     const std::vector<int>& activeTags,
     const std::vector<std::vector<double>>& time);
 
+void writeGridToJson(
+    const std::string& filename,
+    const std::vector<double>& verts,
+    const std::vector<uint32_t>& simps,
+    const std::vector<int>& activeTags,
+    const std::vector<std::vector<double>>& time); 
+
 #endif /* io_h */

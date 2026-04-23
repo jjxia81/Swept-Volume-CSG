@@ -21,6 +21,7 @@
 
 #include "trajectory.h"
 #include "csgFuncs.h"
+#include "csg_tet.h"
 
 #define SAVE_CONTOUR 0
 #define batch_stats 0
@@ -334,8 +335,20 @@ int main(int argc, const char* argv[])
         implicit_sweep = [&](Eigen::RowVector4d data) { return flippingDonutFullTurn(data); };
     }
 
+    if (!std::filesystem::exists(output_path)) {
+        // Attempt to create the directory
+        if (std::filesystem::create_directory(output_path)) {
+            sweep::logger().info("Created output directory: {}", output_path);
+        } else {
+            sweep::logger().error("Failed to create output directory: {}", output_path);
+        }
+    } else {
+        sweep::logger().info("Output directory already exists: {}", output_path);
+    }
+
     sweep::GridSpec grid_spec;
     sweep::SweepOptions options;
+    options.out_dir = output_path;
 
     if (args.config_file != "") {
         load_config(args.config_file, grid_spec, options);
@@ -350,19 +363,23 @@ int main(int argc, const char* argv[])
     }
     bool input_csg_funcs = true;
     std::vector<FuncType> funcs;
-    // sweep::CSGFunction csg_f = csgf::csgf_sphere3d;
-    sweep::CSGFunction csg_f = csgf::csgf_tet;
+    sweep::CSGFunction csg_f; 
+    
     if(input_csg_funcs)
     {
-        
         // funcs.push_back(csgf::sphere3d_f1);
         // funcs.push_back(csgf::sphere3d_f2);
+        // grid_spec.bbox_max = csgf::bbox_max;
+        // grid_spec.bbox_min = csgf::bbox_min;
+        // csg_f = csgf::csgf_sphere3d;
 
-        funcs.push_back(csgf::tet_f1);
-        funcs.push_back(csgf::tet_f2);
-        funcs.push_back(csgf::tet_f3);
-        funcs.push_back(csgf::tet_f4);
-        
+        csg_f = csgfTet::csgf_tet;
+        funcs.push_back(csgfTet::tet_f1);
+        funcs.push_back(csgfTet::tet_f2);
+        funcs.push_back(csgfTet::tet_f3);
+        funcs.push_back(csgfTet::tet_f4);
+        grid_spec.bbox_max = csgfTet::bbox_max;
+        grid_spec.bbox_min = csgfTet::bbox_min;
         // funcs.push_back(implicit_sweep);
     } else {
         funcs.push_back(implicit_sweep);
@@ -382,16 +399,7 @@ int main(int argc, const char* argv[])
                             .time_since_epoch()
                             .count();
 
-    if (!std::filesystem::exists(output_path)) {
-        // Attempt to create the directory
-        if (std::filesystem::create_directory(output_path)) {
-            sweep::logger().info("Created output directory: {}", output_path);
-        } else {
-            sweep::logger().error("Failed to create output directory: {}", output_path);
-        }
-    } else {
-        sweep::logger().info("Output directory already exists: {}", output_path);
-    }
+    
 
     lagrange::io::save_mesh(output_path + "/sweep_surface.obj", sweep_surface); 
     lagrange::io::save_mesh(output_path + "/envelope.msh", envelope);
@@ -399,7 +407,6 @@ int main(int argc, const char* argv[])
     lagrange::io::save_mesh(output_path + "/arrangement.msh", sweep_arrangement);
     save_features(output_path + "/features.obj", sweep_arrangement);
 
-    
 #if SAVE_CONTOUR
     // mtet::save_mesh(output_path + "/tet_grid.msh", grid);
     // save_grid_for_mathematica(output_path + "/contour_iso.json", grid,

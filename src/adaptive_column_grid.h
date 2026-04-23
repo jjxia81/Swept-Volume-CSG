@@ -40,8 +40,9 @@ public:
     Eigen::RowVector4d coord;
     funcVGrad valGradList;
     Eigen::RowVectorXd vals; 
-    // std::vector<funcVGrad> funcVGrads;
     MatrixX4dRowMajor grads;
+    bool active = false;
+
     // std::vector<std::pair<Scalar, Eigen::RowVector4d>> valGradListCSG;
     vertex4d() = default;
     vertex4d(
@@ -174,6 +175,22 @@ public:
         time_list timeList(vert4dList.size());
         for (size_t i = 0; i < vert4dList.size(); i++) {
             timeList[i] = vert4dList[i].time;
+        }
+        return timeList;
+    }
+
+    time_list getActiveTimeList() const
+    {
+        // time_list timeList(vert4dList.size());
+        time_list timeList;
+        for (size_t i = 0; i < vert4dList.size(); i++) {
+            if(vert4dList[i].active || i == 0 || i == vert4dList.size() - 1)
+            {
+                timeList.emplace_back(vert4dList[i].time);
+            } 
+            // else {
+            //     timeList[i] = timeList[i-1];
+            // }
         }
         return timeList;
     }

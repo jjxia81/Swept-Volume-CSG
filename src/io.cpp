@@ -107,7 +107,7 @@ void convert_4d_grid_mtetcol(
         }
         vertIt++;
     });
-
+    size_t active_tet_count = 0;
     grid.seq_foreach_tet([&](TetId tid, [[maybe_unused]] std::span<const VertexId, 4> data) {
         std::span<VertexId, 4> vs = grid.get_tet(tid);
         simps.emplace_back(static_cast<uint32_t>(ind4DMap[value_of(vs[0])]));
@@ -117,6 +117,7 @@ void convert_4d_grid_mtetcol(
        
         auto tetKey = getTetKeyByVidsIO(vs);
         auto it = activeColMap.find(tetKey);
+        if(it != activeColMap.end()) active_tet_count ++;
         int tetActiveVal = (it != activeColMap.end()) ? it->second : 0;
         tetActiveTags.push_back(tetActiveVal); 
         tet4d_num += vertexMap[value_of(vs[0])].vert4dList.size();
@@ -125,6 +126,8 @@ void convert_4d_grid_mtetcol(
         tet4d_num += vertexMap[value_of(vs[3])].vert4dList.size();
         tet4d_num -= 4;
     });
+
+    sweep::logger().info("3D grid tet Number: {} 3D active Tet Number: {}", grid.get_num_tets(), active_tet_count);
 
     sweep::logger().info("4D Vertex Number: {} 4D Tetrahedra Number: {}", vert4d_num, tet4d_num);
 }
@@ -465,4 +468,42 @@ void export_to_mathematica(
     //     if (i + 1 < values.size()) f << ",";
     // }
     // f << "};\n";
+}
+
+
+void writeGridToJson(
+    const std::string& filename,
+    const std::vector<double>& verts,
+    const std::vector<uint32_t>& simps,
+    const std::vector<int>& activeTags,
+    const std::vector<std::vector<double>>& time) 
+{
+    using json = nlohmann::json;
+    json j;
+    j["vertices"]           = verts;
+    j["simplicies"]         = simps;
+    std::vector<double> timeSamples; 
+    std::vector<size_t> timeStartIndices;
+    timeStartIndices.push_back(0);
+    size_t timeEndIndex = 0;
+    for(size_t i = 0; i < time.size(); ++i)
+    {
+        for(auto tVal : time[i])
+        {
+            timeSamples.push_back(tVal);
+        }
+        timeEndIndex += time[i].size();
+        timeStartIndices.push_back(timeEndIndex);
+    }
+    j["time_samples"]       = timeSamples;
+    j["time_start_indices"] = timeStartIndices;
+    j["tet_flags"] = activeTags;
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        throw std::runtime_error("Failed to open file: " + filename);
+    }
+    file << j.dump(4);  // pretty print with 4-space indent
+    file.close();
+
+    std::cout << "Written to " << filename << std::endl;
 }

@@ -119,7 +119,8 @@ refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs,
     spdlog::set_level(spdlog::level::off);
     // std::vector<SpaceTimeFunction>  funcs;
     // funcs.push_back(f);
-    if (!gridRefine2(
+    
+    if (!gridRefineCSG(
             grid,
             vertexMap,
             insideMap,
@@ -151,7 +152,10 @@ refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs,
     
     convert_4d_grid_mtetcol(grid, vertexMap, tetActiveMap, verts, simps, tetActiveTags, time, values, cyclic);
 
-    std::string outpath = "/home/jjxia/Documents/projects/Swept-Volume-CSG/output/output_grid.m"; 
+    std::string outgrid_json_path = options.out_dir +  "/output_grid.json"; 
+    writeGridToJson(outgrid_json_path, verts, simps, tetActiveTags, time);
+
+    std::string outpath = options.out_dir +  "/output_grid.m"; 
     export_to_mathematica(outpath, verts, simps, tetActiveTags, time); 
 
     return {verts, simps, time, values};

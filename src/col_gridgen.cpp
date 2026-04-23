@@ -10,8 +10,6 @@
 #include "col_gridgen.h"
 
 #define parallel_bezier 0
-
-
 /// Sample the list of 5-cells based on the base tetrahedra and 4 lists of time samples at its vertices. The extrusion/sampling is based on lowest time stamp, the second lowest time stamp, and the vertex id comparing the four incremental time stamps at each vertex.
 /// @param[in] grid: the base tetrahedra grid in `mtet` structure
 /// @param[in] tid: the tetrahedra id that is going to be extruded

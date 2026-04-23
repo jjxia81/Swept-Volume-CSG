@@ -97,6 +97,23 @@ bool bezierDerOrds(
     return get_sign(bezierGrad.maxCoeff()) == get_sign(bezierGrad.minCoeff());
 }
 
+void bezierDerOrdsForFtVals(
+    const Eigen::RowVector<double, 35>& ords,
+    const std::array<Eigen::RowVector4d, 5>& verts,
+    Eigen::Ref<Eigen::RowVector<double, 35>> bezierGrad)
+{
+    Eigen::RowVector<double, 16> vals;
+    double norm = (verts[0] - verts[4]).norm();
+    // Loop through rows of derMatrix
+    for (int i = 0; i < 15; i++) {
+        vals[i] = (ords[derMatrix[i][0]] - ords[derMatrix[i][1]]) * 3.0 /
+                  norm; // Normalize by the norm of verts
+    }
+    vals[15] = 0;
+    bezierElev(vals, bezierGrad);
+    return;
+}
+
 /// Extremely fast outside-hull clipping test for a 2D set of Bezier ordinates projected to the plane.
 /// Given 35 2D points (e.g., a cubic Bezier simplex control points in 4D),
 /// this routine checks whether all points lie within some origin-centered half-plane
@@ -197,3 +214,4 @@ void getBezier4DDomFuncIds(
     }
     domFIds.assign(dFIds.begin(), dFIds.end());
 }
+

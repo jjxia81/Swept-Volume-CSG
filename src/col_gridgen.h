@@ -51,7 +51,7 @@ bool gridRefine(
 using CSGFuncs = std::vector<std::function<std::pair<Scalar, Eigen::RowVector4d>(Eigen::RowVector4d)>>;  
 using CSGFunction = std::function<std::pair<double, size_t>(Eigen::RowVectorXd)>;
 
-bool gridRefine2(
+bool gridRefineCSG(
     mtet::MTetMesh& grid,
     vertExtrude& vertexMap,
     insidenessMap& insideMap,

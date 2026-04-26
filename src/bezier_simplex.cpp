@@ -1,12 +1,5 @@
 #include "bezier_simplex.h"
 
-
-
-
-
-
-
-
 /// Compute the adjugate (classical adjoint) of a 4×4 matrix using explicit minor and cofactor expansion.
 /// The adjugate matrix is the transpose of the cofactor matrix and is used in computing the matrix inverse
 /// or determinant-related geometric transformations in 4D computations. This implementation iteratively

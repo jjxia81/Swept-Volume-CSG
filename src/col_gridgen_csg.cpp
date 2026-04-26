@@ -9,6 +9,7 @@
 #include "col_gridgen.h"
 #include <unordered_set>
 #include "bezier_simplex.h"
+#include <omp.h>
 
 #define parallel_bezier 0
 
@@ -409,6 +410,8 @@ struct PushOneColCtx {
     ColScratch&         scratch;
 };
 
+
+
 uint64_t getTetKeyByVids(const std::span<VertexId, 4>& vs)
 {
     std::array<uint64_t, 4> ids = {value_of(vs[0]), value_of(vs[1]), value_of(vs[2]), value_of(vs[3])};
@@ -571,9 +574,9 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
                         // equalSurfaceFuncPairs[ci](id_a, id_b) = 1;
                         pairToTets[{id_a, id_b}].push_back(ci);
                     }
-                    if(needs_refine) break;
+                    // if(needs_refine) break;
                 }
-                if(needs_refine) break;
+                // if(needs_refine) break;
             }
         }
         if (needs_refine) {
@@ -888,7 +891,344 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
 #endif // !only_stage1
 }
 
+// ============================================================
+//  Thread-local context for parallel push_one_col evaluation
+// ============================================================
+struct ThreadLocalCtx {
+    ColScratch scratch;
+    std::vector<TimeElem>  timeQ;
+    std::vector<SpaceElem> spaceQ;
+    std::vector<uint64_t>  active_tet_keys;
+    std::vector<vertex4d*> active_vert_ptrs;          // vertex4d to mark active
+    std::vector<std::array<VertexId, 4>> inside_tets;
+    double min_tet_ratio = 1.0;
+};
 
+// ============================================================
+//  Thread-local push_one_col
+//  Reads from shared ctx, writes only to ThreadLocalCtx.
+// ============================================================
+static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx& tl)
+{
+    auto& grid       = ctx.grid;
+    auto& vertexMap  = ctx.vertexMap;
+    auto& funcs      = ctx.funcs;
+    auto& sc         = tl.scratch;
+    const double threshold            = ctx.threshold;
+    const double traj_threshold       = ctx.traj_threshold;
+    const int    insideness_check     = ctx.insideness_check;
+    const double time_scale           = ctx.time_scale;
+    const double min_tet_radius_ratio = ctx.min_tet_radius_ratio;
+    const double min_tet_edge_length  = ctx.min_tet_edge_length;
+    auto& profileTimer = ctx.profileTimer;
+    auto& profileCount = ctx.profileCount;
+
+    const size_t CSGFuncNum = funcs.size();
+    if (!grid.has_tet(tid)) return;
+    const auto& tetVids = grid.get_tet(tid);
+
+    simpCol::cell5_list cell5Col;
+    sampleCol(tetVids, vertexMap, cell5Col);
+
+    gather_base_verts(tetVids, vertexMap, sc.baseVertsPtr, sc.baseCoord);
+
+    // ── Tet quality check ────────────────────────────────────────────────
+    {
+        std::array<Eigen::RowVector3d, 4> tet_pts = {
+            sc.baseCoord[0].head<3>(), sc.baseCoord[1].head<3>(),
+            sc.baseCoord[2].head<3>(), sc.baseCoord[3].head<3>()
+        };
+        const auto tet_ratio = tet_radius_ratio(tet_pts);
+        if (tet_ratio < min_tet_radius_ratio) {
+            tl.inside_tets.push_back({tetVids[0], tetVids[1], tetVids[2], tetVids[3]});
+            return;
+        }
+        tl.min_tet_ratio = std::min(tl.min_tet_ratio, tet_ratio);
+    }
+
+    find_longest_edge(grid, tid, sc.longest_edge, sc.longest_edge_length);
+
+    // Helper: thread-local space push
+    auto try_push_space_tl = [&]() -> bool {
+        if (sc.longest_edge_length <= min_tet_edge_length) return false;
+        tl.spaceQ.emplace_back(sc.longest_edge_length, tid, sc.longest_edge);
+        std::push_heap(tl.spaceQ.begin(), tl.spaceQ.end(), compSpace);
+        return true;
+    };
+
+    // ── Stage 1.1: silhouette refinement per cell5 ───────────────────────
+    bool terminate    = false;
+    bool baseSub      = false;
+    bool activeCol    = false;
+
+    sc.cellDomFuncIds.assign(cell5Col.size(), {});
+    sc.cellDFuncFt0XIds.setZero(cell5Col.size(), CSGFuncNum);
+    sc.cellDFunc0XIds.setZero(cell5Col.size(), CSGFuncNum);
+
+    std::vector<Eigen::MatrixXi> equalSurfaceFuncPairs(
+        CSGFuncNum, Eigen::MatrixXi::Zero(CSGFuncNum, CSGFuncNum));
+    std::unordered_map<std::pair<size_t, size_t>, std::vector<size_t>, PairHash> pairToTets;
+
+    size_t last_v_ind = 0;
+    if (isTemporalRefine) {
+        for (size_t tvi = 0; tvi < 4; ++tvi) {
+            if (value_of(tetVids[tvi]) == tempRefineVtId) {
+                last_v_ind = tvi;
+            }
+        }
+    }
+
+    std::vector<bool> cell5TempUpdated(cell5Col.size(), false);
+    Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor> bezierValsShared;
+    Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor> bezierFtValsShared;
+    bezierValsShared.setZero(CSGFuncNum, 35);
+    bezierFtValsShared.setZero(CSGFuncNum, 35);
+
+    for (size_t ci = 0; ci < cell5Col.size(); ci++) {
+        if (isTemporalRefine) {
+            bool isUpdatedTempTet = false;
+            if (cell5Col[ci].bot(last_v_ind) == tempRefineTimeVal ||
+                (cell5Col[ci].top() == tempRefineTimeVal && cell5Col[ci].hash[4] == last_v_ind)) {
+                isUpdatedTempTet = true;
+                cell5TempUpdated[ci] = true;
+            }
+            if (!isUpdatedTempTet) continue;
+        }
+
+        bind_cell5_verts(cell5Col[ci], sc.baseVertsPtr, sc.tet4DVertsPtr);
+
+        std::vector<size_t> domFIds;
+        calBezierCoordsAndDomFuncIds(sc.tet4DVertsPtr, profileTimer, profileCount,
+                                     bezierValsShared, bezierFtValsShared, domFIds);
+
+        bool choice = false, zeroX = false;
+        bool inside = false;
+        bool needs_refine = refineFtCSG(
+            sc.tet4DVertsPtr, bezierValsShared, bezierFtValsShared, domFIds,
+            traj_threshold, choice, inside, zeroX,
+            profileTimer, profileCount,
+            sc.cellDFuncFt0XIds.row(ci), sc.cellDFunc0XIds.row(ci));
+
+        sc.zeroX_list[ci] = zeroX;
+        if (insideness_check && inside) {
+            tl.inside_tets.push_back({tetVids[0], tetVids[1], tetVids[2], tetVids[3]});
+            return;
+        }
+        if (zeroX) activeCol = true;
+
+        bool eqaulSurf0X = false;
+        bool refineB3 = true;
+        if (!needs_refine && refineB3) {
+            for (size_t id_a = 0; id_a < CSGFuncNum; ++id_a) {
+                if (sc.cellDFunc0XIds.row(ci)(id_a) == 0) continue;
+                for (size_t id_b = id_a + 1; id_b < CSGFuncNum; ++id_b) {
+                    if (sc.cellDFunc0XIds.row(ci)(id_b) == 0) continue;
+                    needs_refine = refineEqualSurfaceCSG(
+                        sc.tet4DVertsPtr, bezierValsShared, bezierFtValsShared,
+                        traj_threshold, {id_a, id_b}, choice, eqaulSurf0X,
+                        profileTimer, profileCount);
+                    if (eqaulSurf0X) {
+                        activeCol = true;
+                        pairToTets[{id_a, id_b}].push_back(ci);
+                    }
+                }
+            }
+        }
+
+        if (needs_refine) {
+            sc.subList[ci]     = true;
+            sc.timeLenList[ci] = sc.tet4DVertsPtr[0]->time - sc.tet4DVertsPtr[4]->time;
+            sc.timeList[ci]    = (sc.tet4DVertsPtr[0]->time + sc.tet4DVertsPtr[4]->time) / 2;
+            sc.indList[ci]     = cell5Col[ci].hash[4];
+            sc.choiceList[ci]  = choice;
+        } else {
+            sc.subList[ci] = false;
+        }
+    }
+
+    // ── Push refinement requests to thread-local queues ──────────────────
+    for (size_t ci = 0; ci < cell5Col.size(); ci++) {
+        if (!sc.subList[ci]) continue;
+        terminate = true;
+        if (sc.choiceList[ci]) {
+            if (sc.timeLenList[ci] > MIN_TIME) {
+                tl.timeQ.emplace_back(
+                    (double)sc.timeLenList[ci] * time_scale / MAX_TIME,
+                    tid, tetVids[sc.indList[ci]], (int)sc.timeList[ci]);
+                std::push_heap(tl.timeQ.begin(), tl.timeQ.end(), compTime);
+            }
+        } else {
+            if (!baseSub) {
+                if (try_push_space_tl()) baseSub = true;
+            }
+        }
+    }
+
+    // ── Cap refinement at t=0 and t=1 boundaries ─────────────────────────
+    bool refineCap = true;
+    if (!baseSub && !terminate && refineCap &&
+        (!isTemporalRefine || (isTemporalRefine && cell5TempUpdated[0])))
+    {
+        for (size_t dfId = 0; dfId < funcs.size(); ++dfId) {
+            if (sc.cellDFunc0XIds.row(0)(dfId) == 0) continue;
+            activeCol = true;
+            for (size_t i = 0; i < 4; i++) {
+                sc.capVertsPtr[i] = &sc.baseVertsPtr[i]->vert4dList.front();
+            }
+            if (refine3DCSG(sc.capVertsPtr, threshold, dfId)) {
+                if (try_push_space_tl()) baseSub = true;
+                break;
+            }
+        }
+    }
+
+    if (!baseSub && !terminate && refineCap &&
+        (!isTemporalRefine || (isTemporalRefine && cell5TempUpdated[cell5Col.size() - 1])))
+    {
+        for (size_t dfId = 0; dfId < funcs.size(); ++dfId) {
+            if (sc.cellDFunc0XIds.row(cell5Col.size() - 1)(dfId) == 0) continue;
+            activeCol = true;
+            for (size_t i = 0; i < 4; i++) {
+                sc.capVertsPtr[i] = &sc.baseVertsPtr[i]->vert4dList.back();
+            }
+            if (refine3DCSG(sc.capVertsPtr, threshold, dfId)) {
+                if (try_push_space_tl()) baseSub = true;
+                break;
+            }
+        }
+    }
+
+    // ── Record activity (deferred to serial merge) ───────────────────────
+    if (activeCol) {
+        tl.active_tet_keys.push_back(getTetKeyByVids(tetVids));
+        for (size_t vid = 0; vid < 5; vid++) {
+            tl.active_vert_ptrs.push_back(sc.tet4DVertsPtr[vid]);
+        }
+    }
+
+    if (baseSub) terminate = true;
+    if (terminate) return;
+
+    // ── Stage 2: contour-based refinement ────────────────────────────────
+#ifndef only_stage1
+    std::array<mtet::Scalar, 12> spatial_verts;
+    collect_spatial_verts(grid, tetVids, spatial_verts);
+
+    bool refineB2 = true;
+    std::vector<int> nonZeroColIds;
+    for (int j = 0; j < sc.cellDFuncFt0XIds.cols(); ++j)
+        if (sc.cellDFuncFt0XIds.col(j).any())
+            nonZeroColIds.push_back(j);
+    if (!refineB2) nonZeroColIds.clear();
+
+    for (auto dfid : nonZeroColIds) {
+        auto contour = extract_column_contour(
+            sc.baseVertsPtr, spatial_verts, one_column_simp_opt, dfid);
+        const int num_polyhedra = contour.get_num_polyhedra();
+        const int num_vertices  = contour.get_num_vertices();
+
+        std::vector<double>             contour_time;  contour_time.reserve(num_vertices);
+        std::vector<int>                contour_index; contour_index.reserve(num_vertices);
+        std::vector<Eigen::RowVector4d> contour_pos;   contour_pos.reserve(num_vertices);
+        parse_vertices(contour, contour_time, contour_index, contour_pos, spatial_verts);
+
+        const std::array<vertexCol::time_list_f, 4> time = {
+            sc.baseVertsPtr[0]->getTimeList_f(), sc.baseVertsPtr[1]->getTimeList_f(),
+            sc.baseVertsPtr[2]->getTimeList_f(), sc.baseVertsPtr[3]->getTimeList_f()};
+
+        std::vector<mtetcol::Index> vert_id;
+        vert_id.reserve(num_vertices);
+
+        bool space_pushed = false;
+        for (int pi = 0; pi < num_polyhedra && !space_pushed; pi++) {
+            const bool simple = contour.is_polyhedron_regular(pi);
+            parse_polyhedron(contour, pi, vert_id);
+            if (simple) assert(vert_id.size() == 4);
+
+            for (size_t ci = 0; ci < cell5Col.size(); ci++) {
+                if (isTemporalRefine && cell5TempUpdated[ci]) continue;
+                if (sc.cellDFuncFt0XIds.row(ci)(dfid) == 0) continue;
+
+                const bool intersect = cell5_intersects_poly(
+                    cell5Col[ci], vert_id, contour_time, contour_index, time);
+                if (!intersect) continue;
+
+                if (simple) {
+                    for (int vi = 0; vi < (int)vert_id.size(); vi++) {
+                        sc.polygonVerts[vi].coord       = contour_pos[vert_id[vi]];
+                        sc.polygonVerts[vi].valGradList = funcs[dfid](sc.polygonVerts[vi].coord);
+                    }
+                    if (refine3D(sc.polygonVerts, threshold)) {
+                        if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
+                        break;
+                    }
+                } else if (20.0 * sc.longest_edge_length > threshold) {
+                    if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
+                    break;
+                }
+            }
+        }
+        if (space_pushed) break;
+    }
+
+    bool refineB4 = true;
+    if (!refineB4) pairToTets.clear();
+    for (const auto& [pair, tets] : pairToTets) {
+        if (baseSub) break;
+        auto [fid_a, fid_b] = pair;
+
+        auto contour = extract_column_contour(
+            sc.baseVertsPtr, spatial_verts, one_column_simp_opt, fid_a, fid_b);
+        const int num_polyhedra = contour.get_num_polyhedra();
+        const int num_vertices  = contour.get_num_vertices();
+        std::vector<double>             contour_time;  contour_time.reserve(num_vertices);
+        std::vector<int>                contour_index; contour_index.reserve(num_vertices);
+        std::vector<Eigen::RowVector4d> contour_pos;   contour_pos.reserve(num_vertices);
+        parse_vertices(contour, contour_time, contour_index, contour_pos, spatial_verts);
+
+        const std::array<vertexCol::time_list_f, 4> time = {
+            sc.baseVertsPtr[0]->getTimeList_f(), sc.baseVertsPtr[1]->getTimeList_f(),
+            sc.baseVertsPtr[2]->getTimeList_f(), sc.baseVertsPtr[3]->getTimeList_f()};
+
+        std::vector<mtetcol::Index> vert_id;
+        vert_id.reserve(num_vertices);
+
+        bool space_pushed = false;
+        for (int pi = 0; pi < num_polyhedra && !space_pushed; pi++) {
+            const bool simple = contour.is_polyhedron_regular(pi);
+            parse_polyhedron(contour, pi, vert_id);
+            if (simple) assert(vert_id.size() == 4);
+
+            for (size_t ci : tets) {
+                const bool intersect = cell5_intersects_poly(
+                    cell5Col[ci], vert_id, contour_time, contour_index, time);
+                if (!intersect) continue;
+
+                if (simple) {
+                    for (int vi = 0; vi < (int)vert_id.size(); vi++) {
+                        sc.polygonVerts[vi].coord = contour_pos[vert_id[vi]];
+                        auto valGradListA = funcs[fid_a](sc.polygonVerts[vi].coord);
+                        auto valGradListB = funcs[fid_a](sc.polygonVerts[vi].coord);  // NOTE: original has fid_a here too
+                        sc.polygonVerts[vi].valGradList = {
+                            valGradListA.first + valGradListB.first,
+                            valGradListA.second + valGradListB.second};
+                    }
+                    if (refine3D(sc.polygonVerts, threshold)) {
+                        if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
+                        break;
+                    }
+                } else if (20.0 * sc.longest_edge_length > threshold) {
+                    if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
+                    break;
+                }
+            }
+        }
+    }
+#endif // !only_stage1
+}
+
+
+std::vector<mtet::TetId> candidataTetIds_SM;
 
 // ============================================================
 //  Temporal subdivision step
@@ -952,11 +1292,13 @@ static void do_temporal_split(
         Timer ref_crit_timer(ref_crit, [&](auto t, auto ms) {
             combine_timer(ctx.profileTimer, ctx.profileCount, t, ms); });
 #endif
-        push_one_col(assocTet, ctx);
+        // push_one_col(assocTet, ctx);
+        candidataTetIds_SM.push_back(assocTet);
 #if time_profile
         ref_crit_timer.Stop();
 #endif
     }
+
     isTemporalRefine = false;
 
 }
@@ -1003,7 +1345,8 @@ static void do_spatial_split(
             Timer ref_crit_timer(ref_crit, [&](auto timer, auto ms) {
                 combine_timer(ctx.profileTimer, ctx.profileCount, timer, ms); });
 #endif
-            push_one_col(t, ctx);
+            // push_one_col(t, ctx);
+            candidataTetIds_SM.push_back(t);
 #if time_profile
             ref_crit_timer.Stop();
 #endif
@@ -1018,7 +1361,7 @@ static void do_spatial_split(
 //  gridRefine  — now just orchestration
 // ============================================================
 
-bool gridRefineCSG(
+bool gridRefineCSGOld(
     mtet::MTetMesh& grid,
     vertExtrude& vertexMap,
     insidenessMap& insideMap,
@@ -1066,7 +1409,8 @@ bool gridRefineCSG(
     // Initial pass
     grid.seq_foreach_tet(
         [&](mtet::TetId tid, [[maybe_unused]] std::span<const mtet::VertexId, 4>) {
-            push_one_col(tid, ctx);
+            // push_one_col(tid, ctx);
+            candidataTetIds_SM.push_back(tid);
         });
 
     // Main refinement loop
@@ -1077,7 +1421,15 @@ bool gridRefineCSG(
     size_t tempRefineCount = 0;
     size_t spatialRefineCount = 0;
     
+while(!candidataTetIds_SM.empty())
+{
+    for(int i = 0; i < (int)candidataTetIds_SM.size();  ++i)
+    {
+        auto curTid = candidataTetIds_SM[i];
+        push_one_col(curTid, ctx);
+    }
 
+    candidataTetIds_SM.clear();
     // std::cout << " start refineFtCSG  loop " << std::endl;
     while ((!timeQ.empty() || !spaceQ.empty()) && splits < max_splits) {
 
@@ -1110,6 +1462,7 @@ bool gridRefineCSG(
             spatialRefineCount++;
         }
     }
+}
     size_t valid_tet_count = 0;
 
     for(auto& ele : colActiveMap)
@@ -1119,6 +1472,7 @@ bool gridRefineCSG(
             valid_tet_count ++;
         }
     }
+
     std::cout << " --------- temporal refine count :  "<< tempRefineCount << std::endl;
     std::cout << " --------- spatial refine count :  "<< spatialRefineCount << std::endl;
 
@@ -1126,6 +1480,183 @@ bool gridRefineCSG(
 
     // std::cout << " --------- 3d_tet_count "<<  << std::endl;
 
+    sweep::logger().info(
+        "Total splits: {}  Spatial splits: {}  Minimum tet radius ratio: {}",
+        splits, spatial_splits, min_tet_ratio);
+    return true;
+}
+
+bool gridRefineCSG(
+    mtet::MTetMesh& grid,
+    vertExtrude& vertexMap,
+    insidenessMap& insideMap,
+    const CSGFuncs& funcs,
+    CSGFunction csg_f,
+    const double threshold,
+    const double traj_threshold,
+    const int max_splits,
+    const int insideness_check,
+    std::array<double, timer_amount>& profileTimer,
+    std::array<size_t, timer_amount>& profileCount,
+    std::unordered_map<uint64_t, int>& colActiveMap,
+    size_t initial_time_samples,
+    double min_tet_radius_ratio,
+    double min_tet_edge_length,
+    const std::string& out_dir)
+{
+    set_csg_val_func(csg_f);
+    init5CGridCSG(initial_time_samples, grid, funcs, MAX_TIME, vertexMap);
+
+
+    std::string log_path = out_dir + "/run_log.txt";
+    std::ofstream log_file(log_path);
+    auto file_log = [&](const std::string& msg) {
+        // std::cout << msg << std::endl;
+        if (log_file.is_open()) log_file << msg << std::endl;
+    };
+
+    const double time_scale = calTimeGlobalScaleWithInitGridCSG(vertexMap);
+    std::cout << " --- time scale : " << time_scale << std::endl;
+
+    file_log(" --- time scale : " + std::to_string(time_scale)); 
+
+    colActiveMapPtr = &colActiveMap;
+
+    // Global queues (merged from per-thread)
+    std::vector<TimeElem>  timeQ;
+    std::vector<SpaceElem> spaceQ;
+
+    int splits = 0, temporal_splits = 0, spatial_splits = 0;
+    double min_tet_ratio = 1.0;
+
+    // Single shared scratch for serial split functions only
+    ColScratch serial_scratch;
+    serial_scratch.polygonVerts.fill(vertex4d(funcs.size()));
+
+    PushOneColCtx ctx{
+        grid, vertexMap, insideMap, funcs,
+        threshold, traj_threshold, insideness_check,
+        time_scale, min_tet_radius_ratio, min_tet_edge_length,
+        timeQ, spaceQ, profileTimer, profileCount,
+        min_tet_ratio, serial_scratch};
+
+    // ── Initial pass: collect all tets ───────────────────────────────────
+    grid.seq_foreach_tet(
+        [&](mtet::TetId tid, [[maybe_unused]] std::span<const mtet::VertexId, 4>) {
+            candidataTetIds_SM.push_back(tid);
+        });
+
+    TimeElem  time_ele{};
+    SpaceElem space_ele{};
+    bool has_time_ele  = false;
+    bool has_space_ele = false;
+    size_t tempRefineCount = 0;
+    size_t spatialRefineCount = 0;
+
+    while (!candidataTetIds_SM.empty()) {
+        const int n = (int)candidataTetIds_SM.size();
+        const int num_threads = omp_get_max_threads();
+
+        // ── Per-thread state ─────────────────────────────────────────────
+        std::vector<ThreadLocalCtx> tls(num_threads);
+        for (auto& tl : tls) {
+            tl.scratch.polygonVerts.fill(vertex4d(funcs.size()));
+        }
+
+        // ── Parallel evaluation phase ────────────────────────────────────
+        #pragma omp parallel
+        {
+            const int tid = omp_get_thread_num();
+            auto& tl = tls[tid];
+
+            #pragma omp for schedule(dynamic, 16)
+            for (int i = 0; i < n; ++i) {
+                auto curTid = candidataTetIds_SM[i];
+                push_one_col_tl(curTid, ctx, tl);
+            }
+        }
+
+        // ── Serial merge phase ───────────────────────────────────────────
+        for (auto& tl : tls) {
+            // Merge time queue
+            for (auto& e : tl.timeQ) {
+                timeQ.push_back(e);
+                std::push_heap(timeQ.begin(), timeQ.end(), compTime);
+            }
+            // Merge space queue
+            for (auto& e : tl.spaceQ) {
+                spaceQ.push_back(e);
+                std::push_heap(spaceQ.begin(), spaceQ.end(), compSpace);
+            }
+            // Mark inside tets
+            for (auto& vids : tl.inside_tets) {
+                std::array<VertexId, 4> arr = vids;
+                std::span<VertexId, 4> sp{arr.data(), 4};
+                insideMap[sp] = true;
+            }
+            // Mark active tets
+            for (auto k : tl.active_tet_keys) {
+                (*colActiveMapPtr)[k] = 1;
+            }
+            // Mark active vertices
+            for (auto* vp : tl.active_vert_ptrs) {
+                vp->active = true;
+            }
+            // Reduce min tet ratio
+            min_tet_ratio = std::min(min_tet_ratio, tl.min_tet_ratio);
+        }
+
+        candidataTetIds_SM.clear();
+
+        // ── Serial mesh-mutation phase ───────────────────────────────────
+        // Pop from queues and split. Splits are sequential because they
+        // mutate grid topology. Each split appends new tets to
+        // candidataTetIds_SM, processed in the next outer iteration.
+        while ((!timeQ.empty() || !spaceQ.empty()) && splits < max_splits) {
+            bool refine_temporal = false;
+
+            if (!timeQ.empty() && !has_time_ele) {
+                std::pop_heap(timeQ.begin(), timeQ.end(), compTime);
+                time_ele = timeQ.back();
+                timeQ.pop_back();
+                has_time_ele = true;
+                // refine_temporal = true;
+            }
+            if (!spaceQ.empty() && !has_space_ele) {
+                std::pop_heap(spaceQ.begin(), spaceQ.end(), compSpace);
+                space_ele = spaceQ.back();
+                spaceQ.pop_back();
+                has_space_ele = true;
+            }
+
+            refine_temporal =
+                has_time_ele && (!has_space_ele ||
+                                 std::get<0>(time_ele) > std::get<0>(space_ele));
+
+            if (refine_temporal) {
+                has_time_ele = false;
+                do_temporal_split(time_ele, grid, vertexMap, insideMap, funcs,
+                                  splits, temporal_splits, ctx);
+                tempRefineCount++;
+            } else {
+                has_space_ele = false;
+                do_spatial_split(space_ele, grid, vertexMap, insideMap, funcs,
+                                 splits, spatial_splits, ctx);
+                spatialRefineCount++;
+            }
+        }
+    }
+
+    // ── Stats ────────────────────────────────────────────────────────────
+    size_t valid_tet_count = 0;
+    for (auto& ele : colActiveMap) {
+        if (ele.second) valid_tet_count++;
+    }
+    std::cout << " --------- temporal refine count :  " << tempRefineCount << std::endl;
+    std::cout << " --------- spatial refine count :  "  << spatialRefineCount << std::endl;
+    file_log(" --------- temporal refine count :  " + std::to_string(tempRefineCount)); 
+    file_log(" --------- spatial refine count : " + std::to_string(spatialRefineCount)); 
+    log_file.close();
     sweep::logger().info(
         "Total splits: {}  Spatial splits: {}  Minimum tet radius ratio: {}",
         splits, spatial_splits, min_tet_ratio);

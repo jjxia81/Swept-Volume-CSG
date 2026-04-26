@@ -45,6 +45,7 @@ void convert_4d_grid_mtetcol(
     std::vector<int>& tetActiveTags,
     std::vector<std::vector<double>>& time,
     std::vector<std::vector<double>>& values,
+    const std::string& out_dir,
     bool cyclic);
 
 mshio::MshSpec generate_spec(const Eigen::MatrixXd& V, const Eigen::MatrixXi& F, TimeMap timeMap);

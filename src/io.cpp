@@ -73,6 +73,7 @@ void convert_4d_grid_mtetcol(
     std::vector<int>& tetActiveTags,
     std::vector<std::vector<double>>& time,
     std::vector<std::vector<double>>& values,
+    const std::string& out_dir,
     bool cyclic)
 {
     size_t vert_num = grid.get_num_vertices();
@@ -126,6 +127,21 @@ void convert_4d_grid_mtetcol(
         tet4d_num += vertexMap[value_of(vs[3])].vert4dList.size();
         tet4d_num -= 4;
     });
+
+    
+    std::string log_path = out_dir + "/run_log.txt";
+    std::ofstream log_file(log_path);
+   
+    if (log_file.is_open()) 
+    {
+        log_file << "3D grid tet Number:  "+ std::to_string(grid.get_num_tets()) 
+                +  " 3D active Tet Number: "+ std::to_string(active_tet_count) << std::endl;
+        log_file << "4D Vertex Number:  "+ std::to_string(vert4d_num) 
+                +  " 4D Tetrahedra Number: "+ std::to_string(tet4d_num) << std::endl;
+        log_file.close();
+    }
+    
+    
 
     sweep::logger().info("3D grid tet Number: {} 3D active Tet Number: {}", grid.get_num_tets(), active_tet_count);
 

@@ -136,13 +136,23 @@ refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs,
             tetActiveMap,
             options.initial_time_samples,
             options.min_tet_radius_ratio,
-            options.min_tet_edge_length)) {
+            options.min_tet_edge_length,
+            options.out_dir)) {
         throw std::runtime_error("ERROR: grid generation failed");
+    };
+
+    std::string log_path = options.out_dir + "/run_log.txt";
+    std::ofstream log_file(log_path);
+    auto file_log = [&](const std::string& msg) {
+        // std::cout << msg << std::endl;
+        if (log_file.is_open()) log_file << msg << std::endl;
     };
 
     spdlog::set_level(spdlog::level::info);
     size_t total_sample_number = calRefinedGridSampleNumber(vertexMap);
     sweep::logger().info("--Total sample number {}", total_sample_number);
+    file_log("--Total sample number " + std::to_string(total_sample_number));
+    log_file.close();
 
     bool cyclic = options.cyclic;
     std::vector<mtetcol::Scalar> verts;
@@ -150,14 +160,15 @@ refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs,
     std::vector<int> tetActiveTags;
     std::vector<std::vector<double>> time;
     std::vector<std::vector<double>> values;
-    
-    convert_4d_grid_mtetcol(grid, vertexMap, tetActiveMap, verts, simps, tetActiveTags, time, values, cyclic);
+
+    convert_4d_grid_mtetcol(grid, vertexMap, tetActiveMap, verts, simps, tetActiveTags, time, values, options.out_dir, cyclic);
 
     std::string outgrid_json_path = options.out_dir +  "/output_grid.json"; 
     writeGridToJson(outgrid_json_path, verts, simps, tetActiveTags, time);
 
     std::string outpath = options.out_dir +  "/output_grid.m"; 
     export_to_mathematica(outpath, verts, simps, tetActiveTags, time); 
+    
 
     // cell_complex::from_simplicial_columns<4>(verts, simps, timeSamples, timeStartIndices);
     return {verts, simps, time, values};
@@ -392,7 +403,6 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
             logger().info(
                 "Grid refinement time: {} seconds",
                 std::chrono::duration<double>(refine_end - refine_start).count());
-
         } 
     } else {
         // auto evaluate_start = std::chrono::high_resolution_clock::now();
@@ -427,15 +437,25 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     auto cellFromGrid = cell_complex::from_simplicial_columns<4>(verts, simps, timeSamples, timeStartIndices);
     logger().info("Successfully generated column grid");
 
+    auto saving_start = std::chrono::time_point_cast<std::chrono::microseconds>(
+                            std::chrono::high_resolution_clock::now())
+                            .time_since_epoch()
+                            .count();
+
     cell_complex::algorithm::compute_silhouette_complex(cellFromGrid, *csgTreePtr);
-    cell_complex::save_obj("silhouette.obj", cellFromGrid);
-    cell_complex::save_msh("silhouette.msh", cellFromGrid);
+    // cell_complex::save_obj(options.out_dir + "/silhouette.obj", cellFromGrid);
+    cell_complex::save_msh(options.out_dir + "/silhouette.msh", cellFromGrid);
     cellFromGrid.validate();
 
     cell_complex::algorithm::compute_envelope_complex(cellFromGrid, *csgTreePtr);
-    cell_complex::save_obj("envelope.obj", cellFromGrid);
-    cell_complex::save_msh("envelope.msh", cellFromGrid);
+    cell_complex::save_obj(options.out_dir + "/envelope.obj", cellFromGrid);
+    cell_complex::save_msh(options.out_dir + "/envelope.msh", cellFromGrid);
 
+    auto saving_end = std::chrono::time_point_cast<std::chrono::microseconds>(
+                          std::chrono::high_resolution_clock::now())
+                          .time_since_epoch()
+                          .count();
+    sweep::logger().info("Surfacing and save time: {} seconds", (saving_end - saving_start) * 1e-6);
     // mtetcol::SimplicialColumn<4> columns;
     // columns.set_vertices(verts);
     // columns.set_simplices(simps);

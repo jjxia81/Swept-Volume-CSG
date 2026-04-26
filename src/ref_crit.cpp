@@ -9,7 +9,7 @@
 #include "bezier_simplex.h"
 
 // shared memory definition
-Eigen::Matrix<double, 2, 35> nPoints_eigen_shared;
+// Eigen::Matrix<double, 2, 35> nPoints_eigen_shared;
 
 bool refineFtBezier(
     const std::array<vertex4d*, 5>& verts,
@@ -88,7 +88,7 @@ bool refineFt(
 #endif
         return false;
     }
-    // Eigen::Matrix<double, 2, 35> nPoints_eigen_shared;
+    Eigen::Matrix<double, 2, 35> nPoints_eigen_shared;
     nPoints_eigen_shared << bezierVals, bezierGrad;
     zeroX = !outHullClip2D(nPoints_eigen_shared);
 #if time_profile
@@ -169,7 +169,7 @@ bool refineFtCSGSingle(
     {
         return false;
     }
-    // Eigen::Matrix<double, 2, 35> nPoints_eigen_shared;
+    Eigen::Matrix<double, 2, 35> nPoints_eigen_shared;
     nPoints_eigen_shared << bezierVals, bezierFtVals;
     refineRes.zeroX = !outHullClip2D(nPoints_eigen_shared);
 
@@ -354,7 +354,7 @@ bool refineEqualSurfaceCSG(
 
     auto equalSurfBezier =  bezier_f1 - bezier_f2;
     if(equalSurfBezier.maxCoeff() * equalSurfBezier.minCoeff() > 0) return false;
-    // Eigen::Matrix<double, 2, 35> nPoints_eigen_shared;
+    Eigen::Matrix<double, 2, 35> nPoints_eigen_shared;
     nPoints_eigen_shared << equalSurfBezier, bezier_f1;
     if(outHullClip2D(nPoints_eigen_shared)) return false;
     nPoints_eigen_shared << equalSurfBezier, bezier_f2;

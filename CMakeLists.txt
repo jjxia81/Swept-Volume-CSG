@@ -18,6 +18,8 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 set(FAST_ARRANGEMENT_ENABLE_PARALLEL OFF CACHE BOOL "" FORCE)
 set(GEO_ENABLE_THREADS               OFF CACHE BOOL "" FORCE)
 
+find_package(OpenMP REQUIRED)
+
 include(cli11)
 include(Eigen3)
 include(nlohmann-json)
@@ -31,10 +33,10 @@ include(spdlog)
 include(cellcomplex)
 include(arrangement)
 include(stf)
-include(lagrange)
 include(unordered_dense)
 include(yaml-cpp)
 include(nanothread)
+include(lagrange)
 
 
 # project library
@@ -68,6 +70,7 @@ target_link_libraries(sweep
         yaml-cpp::yaml-cpp
         stf::stf
         cell_complex::cell_complex
+        OpenMP::OpenMP_CXX
 )
 add_library(sweep::sweep ALIAS sweep)
 set_target_properties(sweep PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -90,6 +93,7 @@ target_link_libraries(generalized_sweep
         nlohmann_json::nlohmann_json
         yaml-cpp::yaml-cpp
         cell_complex::cell_complex
+        # OpenMP::OpenMP_CXX
 )
 
 option(GEN_SWEEP_TESTS "general sweep unit tests" OFF)

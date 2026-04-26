@@ -57,42 +57,36 @@ void save_features(std::string_view filename, lagrange::SurfaceMesh<Scalar, Inde
     }
 }
 
-sweep::CSGFunction make_csg_function(const stf::CSGTree<3>& tree)
-{
-    int buf_size = tree.get_eval_buffer_size();
-    auto val_buf = std::make_shared<std::vector<double>>(buf_size);
-    auto idx_buf = std::make_shared<std::vector<int>>(buf_size);
-
-    return [&tree, val_buf, idx_buf](Eigen::RowVectorXd leaf_values)
-        -> std::pair<double, size_t>
-    {
-        int winner = tree.winning_leaf_flat(
-            leaf_values.data(), val_buf->data(), idx_buf->data());
-        return {leaf_values[winner], static_cast<size_t>(winner)};
-    };
-}
 // sweep::CSGFunction make_csg_function(const stf::CSGTree<3>& tree)
 // {
 //     int buf_size = tree.get_eval_buffer_size();
 //     auto val_buf = std::make_shared<std::vector<double>>(buf_size);
+//     auto idx_buf = std::make_shared<std::vector<int>>(buf_size);
 
-//     return [&tree, val_buf](Eigen::RowVectorXd leaf_values)
+//     return [&tree, val_buf, idx_buf](Eigen::RowVectorXd leaf_values)
 //         -> std::pair<double, size_t>
 //     {
-//         const int n = static_cast<int>(leaf_values.size());
-//         const double root_val = tree.root_value_plan(leaf_values.data(), val_buf->data());
-
-//         // linear search for matching leaf index
-//         const double* data = leaf_values.data();
-//         for (int i = 0; i < n; ++i) {
-//             if (data[i] == root_val) {
-//                 return {root_val, static_cast<size_t>(i)};
-//             }
-//         }
-//         // shouldn't happen for sharp CSG, but fallback to 0
-//         return {root_val, 0};
+//         int winner = tree.winning_leaf_flat(
+//             leaf_values.data(), val_buf->data(), idx_buf->data());
+//         return {leaf_values[winner], static_cast<size_t>(winner)};
 //     };
 // }
+
+const size_t MAX_CSG_LEAF_NODE_NUM = 256;
+sweep::CSGFunction make_csg_function(const stf::CSGTree<3>& tree)
+{
+    return [&tree](Eigen::RowVectorXd leaf_values)
+        -> std::pair<double, size_t>
+    {
+        // stack-allocated, automatic per-thread, zero overhead
+        double val_buf[MAX_CSG_LEAF_NODE_NUM];
+        int    idx_buf[MAX_CSG_LEAF_NODE_NUM];
+        assert(tree.get_eval_buffer_size() <= MAX_CSG_LEAF_NODE_NUM);
+        int winner = tree.winning_leaf_flat(
+            leaf_values.data(), val_buf, idx_buf);
+        return {leaf_values[winner], static_cast<size_t>(winner)};
+    };
+}
 
 using FuncType = std::function<std::pair<double, Eigen::RowVector4d>(Eigen::RowVector4d)> ;
 std::vector<FuncType> make_leaf_functions(const stf::CSGTree<3>& tree)

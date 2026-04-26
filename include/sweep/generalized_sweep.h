@@ -139,7 +139,7 @@ struct SweepOptions {
     /// Tets with longest edge length below this threshold will not be refined further.
     // Scalar min_tet_edge_length = 2e-5;
     // Scalar min_tet_edge_length = 8e-2;
-    Scalar min_tet_edge_length = 0.1;
+    Scalar min_tet_edge_length = 0.04;
 
     std::string out_dir = "." ;
 };

@@ -30,7 +30,7 @@ void convert_4d_grid_mtetcol(
     mtet::MTetMesh grid,
     vertExtrude vertexMap,
     std::vector<double>& verts,
-    std::vector<uint32_t>& simps,
+    std::vector<size_t>& simps,
     std::vector<std::vector<double>>& time,
     std::vector<std::vector<double>>& values,
     bool cyclic);
@@ -41,7 +41,7 @@ void convert_4d_grid_mtetcol(
     vertExtrude vertexMap,
     std::unordered_map<uint64_t, int>& activeColMap,
     std::vector<double>& verts,
-    std::vector<uint32_t>& simps,
+    std::vector<size_t>& simps,
     std::vector<int>& tetActiveTags,
     std::vector<std::vector<double>>& time,
     std::vector<std::vector<double>>& values,
@@ -67,14 +67,14 @@ void save_grid_for_mathematica(
 void export_to_mathematica(
     const std::string& filename,
     const std::vector<double>& verts,
-    const std::vector<uint32_t>& simps,
+    const std::vector<size_t>& simps,
     const std::vector<int>& activeTags,
     const std::vector<std::vector<double>>& time);
 
 void writeGridToJson(
     const std::string& filename,
     const std::vector<double>& verts,
-    const std::vector<uint32_t>& simps,
+    const std::vector<size_t>& simps,
     const std::vector<int>& activeTags,
     const std::vector<std::vector<double>>& time); 
 

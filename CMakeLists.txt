@@ -30,9 +30,11 @@ include(libigl)
 include(spdlog)
 include(arrangement)
 include(stf)
+include(cellcomplex)
 include(lagrange)
 include(yaml-cpp)
 include(nanothread)
+
 
 # project library
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
@@ -64,6 +66,7 @@ target_link_libraries(sweep
         nanothread::nanothread
         yaml-cpp::yaml-cpp
         stf::stf
+        cell_complex::cell_complex
 )
 add_library(sweep::sweep ALIAS sweep)
 set_target_properties(sweep PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -85,6 +88,7 @@ target_link_libraries(generalized_sweep
         lagrange::io
         nlohmann_json::nlohmann_json
         yaml-cpp::yaml-cpp
+        cell_complex::cell_complex
 )
 
 option(GEN_SWEEP_TESTS "general sweep unit tests" OFF)
@@ -98,11 +102,13 @@ if (GEN_SWEEP_TESTS)
  target_link_libraries(sweep_volume_test
     PRIVATE 
     sweep
+    stf
     Catch2::Catch2
     mtet::mtet
     mtetcol::mtetcol
     unordered_dense::unordered_dense
-    smallvector::smallvector)
+    smallvector::smallvector
+    igl)
  target_compile_features(sweep_volume_test PRIVATE cxx_std_20)
  target_compile_definitions(sweep_volume_test PRIVATE CATCH_CONFIG_ENABLE_BENCHMARKING)
 target_compile_definitions(

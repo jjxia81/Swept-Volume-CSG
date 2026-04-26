@@ -602,6 +602,7 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
                     (double)sc.timeLenList[ci] * time_scale / MAX_TIME,
                     tid, tetVids[sc.indList[ci]], (int)sc.timeList[ci]);
                 std::push_heap(timeQ.begin(), timeQ.end(), compTime);
+                // break;
             }
         } else {
             if(!baseSub)
@@ -609,6 +610,7 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
                 try_push_space(spaceQ, baseSub, tid,
                            sc.longest_edge, sc.longest_edge_length, min_tet_edge_length);
             }
+            // break;
         }
     }
 

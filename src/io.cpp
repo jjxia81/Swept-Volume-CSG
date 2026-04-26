@@ -69,7 +69,7 @@ void convert_4d_grid_mtetcol(
     vertExtrude vertexMap,
     std::unordered_map<uint64_t, int>& activeColMap,
     std::vector<double>& verts,
-    std::vector<uint32_t>& simps,
+    std::vector<size_t>& simps,
     std::vector<int>& tetActiveTags,
     std::vector<std::vector<double>>& time,
     std::vector<std::vector<double>>& values,
@@ -110,10 +110,10 @@ void convert_4d_grid_mtetcol(
     size_t active_tet_count = 0;
     grid.seq_foreach_tet([&](TetId tid, [[maybe_unused]] std::span<const VertexId, 4> data) {
         std::span<VertexId, 4> vs = grid.get_tet(tid);
-        simps.emplace_back(static_cast<uint32_t>(ind4DMap[value_of(vs[0])]));
-        simps.emplace_back(static_cast<uint32_t>(ind4DMap[value_of(vs[1])]));
-        simps.emplace_back(static_cast<uint32_t>(ind4DMap[value_of(vs[2])]));
-        simps.emplace_back(static_cast<uint32_t>(ind4DMap[value_of(vs[3])]));
+        simps.emplace_back(static_cast<size_t>(ind4DMap[value_of(vs[0])]));
+        simps.emplace_back(static_cast<size_t>(ind4DMap[value_of(vs[1])]));
+        simps.emplace_back(static_cast<size_t>(ind4DMap[value_of(vs[2])]));
+        simps.emplace_back(static_cast<size_t>(ind4DMap[value_of(vs[3])]));
        
         auto tetKey = getTetKeyByVidsIO(vs);
         auto it = activeColMap.find(tetKey);
@@ -138,7 +138,7 @@ void convert_4d_grid_mtetcol(
     mtet::MTetMesh grid,
     vertExtrude vertexMap,
     std::vector<double>& verts,
-    std::vector<uint32_t>& simps,
+    std::vector<size_t>& simps,
     std::vector<std::vector<double>>& time,
     std::vector<std::vector<double>>& values,
     bool cyclic)
@@ -176,10 +176,10 @@ void convert_4d_grid_mtetcol(
     });
     grid.seq_foreach_tet([&](TetId tid, [[maybe_unused]] std::span<const VertexId, 4> data) {
         std::span<VertexId, 4> vs = grid.get_tet(tid);
-        simps.emplace_back(static_cast<uint32_t>(ind4DMap[value_of(vs[0])]));
-        simps.emplace_back(static_cast<uint32_t>(ind4DMap[value_of(vs[1])]));
-        simps.emplace_back(static_cast<uint32_t>(ind4DMap[value_of(vs[2])]));
-        simps.emplace_back(static_cast<uint32_t>(ind4DMap[value_of(vs[3])]));
+        simps.emplace_back(static_cast<size_t>(ind4DMap[value_of(vs[0])]));
+        simps.emplace_back(static_cast<size_t>(ind4DMap[value_of(vs[1])]));
+        simps.emplace_back(static_cast<size_t>(ind4DMap[value_of(vs[2])]));
+        simps.emplace_back(static_cast<size_t>(ind4DMap[value_of(vs[3])]));
         tet4d_num += vertexMap[value_of(vs[0])].vert4dList.size();
         tet4d_num += vertexMap[value_of(vs[1])].vert4dList.size();
         tet4d_num += vertexMap[value_of(vs[2])].vert4dList.size();
@@ -406,7 +406,7 @@ void save_grid_for_mathematica(
 void export_to_mathematica(
     const std::string& filename,
     const std::vector<double>& verts,
-    const std::vector<uint32_t>& simps,
+    const std::vector<size_t>& simps,
     const std::vector<int>& activeTags,
     const std::vector<std::vector<double>>& time)
 {
@@ -474,7 +474,7 @@ void export_to_mathematica(
 void writeGridToJson(
     const std::string& filename,
     const std::vector<double>& verts,
-    const std::vector<uint32_t>& simps,
+    const std::vector<size_t>& simps,
     const std::vector<int>& activeTags,
     const std::vector<std::vector<double>>& time) 
 {

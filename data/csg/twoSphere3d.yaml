@@ -1,0 +1,38 @@
+  type: csg
+  dimension: 3
+  root:
+    op: intersection
+    smooth_distance: 0.0  # Use 0.0 for hard intersection, positive for smooth
+    # Left child: First ball
+    left:
+      type: sweep
+      primitive:
+        type: ball
+        radius: 0.491934955
+        center: [0.2, 0., 0.]  # First ball center at start
+      transform:
+        type: compose
+        transforms:
+          - type: translation
+            vector: [-1.0, 0.0, 0]   # Translate 
+          - type: rotation
+            axis: [0.0, 1.0, 0.0]
+            angle: -180.0            # Rotate 180 degrees
+            center: [0.0, 0.0, 0.0]  # Rotation center at origin
+        
+    # Right child: Second ball
+    right:
+      type: sweep
+      primitive:
+        type: ball
+        radius: 0.673609679
+        center: [-0.4, 0., 0.]  # Second ball center at start (overlapping with first)
+      transform:
+        type: compose
+        transforms:
+          - type: translation
+            vector: [-1.0, 0.0, 0.0]  # Translate from x=0.3 to x=0.7
+          - type: rotation
+            axis: [0.0, 1.0, 0.0]
+            angle: -180.0            # Rotate 180 degrees
+            center: [0.0, 0.0, 0.0]  # Rotation center at origin

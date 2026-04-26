@@ -7,7 +7,10 @@
 #include <sweep/logger.h>
 #include <yaml-cpp/yaml.h>
 #include <stf/stf.h>
-
+#include <cell_complex/CellComplex.h>
+#include <cell_complex/algorithm/envelope.h>
+#include <cell_complex/algorithm/silhouette.h>
+#include <cell_complex/generators.h>
 #include <array>
 #include <chrono>
 #include <vector>
@@ -17,6 +20,8 @@
 #include "col_gridgen.h"
 #include "io.h"
 #include "post_processing.h"
+#include "cell_msh_io.h"
+#include "cell_obj_io.h"
 
 namespace sweep {
 
@@ -32,69 +37,65 @@ size_t calRefinedGridSampleNumber(vertExtrude& vertexMap)
     return total_sample_number;
 }
 
+// std::tuple<
+//     std::vector<Scalar>,
+//     std::vector<Index>,
+//     std::vector<std::vector<Scalar>>,
+//     std::vector<std::vector<Scalar>>>
+// refine_grid(const SpaceTimeFunction& f, mtet::MTetMesh& grid, const SweepOptions& options)
+// {
+//     logger().info("Adaptively refine the background grid...");
 
+//     // TODO: investigate why saving and loading is necessary here???
+//     mtet::save_mesh("init.msh", grid);
+//     grid = mtet::load_mesh("init.msh");
+//     std::filesystem::remove("init.msh");
 
+//     vertExtrude vertexMap;
+//     insidenessMap insideMap;
 
+//     // TODO: Clarify the purpose of these timers and whether they're still
+//     // needed.
+//     std::array<double, timer_amount> profileTimer{};
+//     std::array<size_t, timer_amount> profileCount{};
+//     spdlog::set_level(spdlog::level::off);
+//     std::vector<SpaceTimeFunction>  funcs;
+//     funcs.push_back(f);
+//     if (!gridRefine(
+//             grid,
+//             vertexMap,
+//             insideMap,
+//             f,
+//             options.epsilon_env,
+//             options.epsilon_sil,
+//             options.max_split,
+//             options.with_insideness_check,
+//             profileTimer,
+//             profileCount,
+//             options.initial_time_samples,
+//             options.min_tet_radius_ratio,
+//             options.min_tet_edge_length)) {
+//         throw std::runtime_error("ERROR: grid generation failed");
+//     };
 
-std::tuple<
-    std::vector<Scalar>,
-    std::vector<Index>,
-    std::vector<std::vector<Scalar>>,
-    std::vector<std::vector<Scalar>>>
-refine_grid(const SpaceTimeFunction& f, mtet::MTetMesh& grid, const SweepOptions& options)
-{
-    logger().info("Adaptively refine the background grid...");
+//     spdlog::set_level(spdlog::level::info);
+//     size_t total_sample_number = calRefinedGridSampleNumber(vertexMap);
+//     sweep::logger().info("--Total sample number {}", total_sample_number);
 
-    // TODO: investigate why saving and loading is necessary here???
-    mtet::save_mesh("init.msh", grid);
-    grid = mtet::load_mesh("init.msh");
-    std::filesystem::remove("init.msh");
+//     bool cyclic = options.cyclic;
+//     std::vector<mtetcol::Scalar> verts;
+//     std::vector<mtetcol::Index> simps;
+//     std::vector<std::vector<double>> time;
+//     std::vector<std::vector<double>> values;
+//     // convert_4d_grid_mtetcol(grid, vertexMap, verts, simps, time, values, cyclic);
 
-    vertExtrude vertexMap;
-    insidenessMap insideMap;
-
-    // TODO: Clarify the purpose of these timers and whether they're still
-    // needed.
-    std::array<double, timer_amount> profileTimer{};
-    std::array<size_t, timer_amount> profileCount{};
-    spdlog::set_level(spdlog::level::off);
-    std::vector<SpaceTimeFunction>  funcs;
-    funcs.push_back(f);
-    if (!gridRefine(
-            grid,
-            vertexMap,
-            insideMap,
-            f,
-            options.epsilon_env,
-            options.epsilon_sil,
-            options.max_split,
-            options.with_insideness_check,
-            profileTimer,
-            profileCount,
-            options.initial_time_samples,
-            options.min_tet_radius_ratio,
-            options.min_tet_edge_length)) {
-        throw std::runtime_error("ERROR: grid generation failed");
-    };
-
-    spdlog::set_level(spdlog::level::info);
-    size_t total_sample_number = calRefinedGridSampleNumber(vertexMap);
-    sweep::logger().info("--Total sample number {}", total_sample_number);
-
-    bool cyclic = options.cyclic;
-    std::vector<mtetcol::Scalar> verts;
-    std::vector<mtetcol::Index> simps;
-    std::vector<std::vector<double>> time;
-    std::vector<std::vector<double>> values;
-    convert_4d_grid_mtetcol(grid, vertexMap, verts, simps, time, values, cyclic);
-
-    return {verts, simps, time, values};
-}
+//     return {verts, simps, time, values};
+// }
 
 
 std::tuple<
     std::vector<Scalar>,
-    std::vector<Index>,
+    std::vector<size_t>,
     std::vector<std::vector<Scalar>>,
     std::vector<std::vector<Scalar>>>
 refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs, 
@@ -145,7 +146,7 @@ refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs,
 
     bool cyclic = options.cyclic;
     std::vector<mtetcol::Scalar> verts;
-    std::vector<mtetcol::Index> simps;
+    std::vector<size_t> simps;
     std::vector<int> tetActiveTags;
     std::vector<std::vector<double>> time;
     std::vector<std::vector<double>> values;
@@ -158,6 +159,7 @@ refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs,
     std::string outpath = options.out_dir +  "/output_grid.m"; 
     export_to_mathematica(outpath, verts, simps, tetActiveTags, time); 
 
+    // cell_complex::from_simplicial_columns<4>(verts, simps, timeSamples, timeStartIndices);
     return {verts, simps, time, values};
 }
 
@@ -359,9 +361,11 @@ void load_config(std::filesystem::path config_path,
     }
 }
 
-SweepResult generalized_sweep(const std::vector<SpaceTimeFunction>& funcs, 
+SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs, 
         CSGFunction csg_f, 
-        GridSpec grid_spec, SweepOptions options)
+        stf::CSGTree<3>* csgTreePtr,
+        GridSpec grid_spec, 
+        SweepOptions options)
 {
     log_config(grid_spec, options);
 
@@ -375,7 +379,7 @@ SweepResult generalized_sweep(const std::vector<SpaceTimeFunction>& funcs,
         std::chrono::duration<double>(init_grid_end - init_grid_start).count());
 
     std::vector<mtetcol::Scalar> verts;
-    std::vector<mtetcol::Index> simps;
+    std::vector<size_t> simps;
     std::vector<std::vector<double>> time;
     std::vector<std::vector<double>> values;
 
@@ -389,22 +393,14 @@ SweepResult generalized_sweep(const std::vector<SpaceTimeFunction>& funcs,
                 "Grid refinement time: {} seconds",
                 std::chrono::duration<double>(refine_end - refine_start).count());
 
-        } else {
-            auto refine_start = std::chrono::high_resolution_clock::now();
-            std::tie(verts, simps, time, values) = refine_grid(funcs[0], grid, options);
-            auto refine_end = std::chrono::high_resolution_clock::now();
-            logger().info(
-                "Grid refinement time: {} seconds",
-                std::chrono::duration<double>(refine_end - refine_start).count());
-        }
-        
+        } 
     } else {
-        auto evaluate_start = std::chrono::high_resolution_clock::now();
-        std::tie(verts, simps, time, values) = evaluate_grid(funcs[0], grid, options);
-        auto evaluate_end = std::chrono::high_resolution_clock::now();
-        logger().info(
-            "Grid evaluation time: {} seconds",
-            std::chrono::duration<double>(evaluate_end - evaluate_start).count());
+        // auto evaluate_start = std::chrono::high_resolution_clock::now();
+        // std::tie(verts, simps, time, values) = evaluate_grid(funcs[0], grid, options);
+        // auto evaluate_end = std::chrono::high_resolution_clock::now();
+        // logger().info(
+        //     "Grid evaluation time: {} seconds",
+        //     std::chrono::duration<double>(evaluate_end - evaluate_start).count());
     }
 
     std::function<std::span<double>(size_t)> time_func = [&](size_t index) -> std::span<double> {
@@ -413,80 +409,105 @@ SweepResult generalized_sweep(const std::vector<SpaceTimeFunction>& funcs,
     std::function<std::span<double>(size_t)> values_func = [&](size_t index) -> std::span<double> {
         return values[index];
     };
-    mtetcol::SimplicialColumn<4> columns;
-    columns.set_vertices(verts);
-    columns.set_simplices(simps);
-    columns.set_time_samples(time_func, values_func);
 
-    constexpr Scalar iso_value = 0.0;
-
-    auto silhouette_start = std::chrono::high_resolution_clock::now();
-    auto contour = columns.extract_contour(iso_value, options.cyclic);
-    auto silhouette_end = std::chrono::high_resolution_clock::now();
-    logger().info(
-        "Silhouette extraction time: {} seconds",
-        std::chrono::duration<double>(silhouette_end - silhouette_start).count());
-
-    if (!contour.is_manifold()) {
-        throw std::runtime_error("ERROR: extracted contour is not manifold");
+    std::vector<double> timeSamples; 
+    std::vector<size_t> timeStartIndices;
+    timeStartIndices.push_back(0);
+    size_t timeEndIndex = 0;
+    for(size_t i = 0; i < time.size(); ++i)
+    {
+        for(auto tVal : time[i])
+        {
+            timeSamples.push_back(tVal);
+        }
+        timeEndIndex += time[i].size();
+        timeStartIndices.push_back(timeEndIndex);
     }
 
-    auto envelope_start = std::chrono::high_resolution_clock::now();
-    result.envelope = compute_envelope(funcs[0], contour, options);
-    auto envelope_end = std::chrono::high_resolution_clock::now();
-    logger().info(
-        "Envelope computation time: {} seconds",
-        std::chrono::duration<double>(envelope_end - envelope_start).count());
+    auto cellFromGrid = cell_complex::from_simplicial_columns<4>(verts, simps, timeSamples, timeStartIndices);
+    logger().info("Successfully generated column grid");
 
-    auto arrangement_start = std::chrono::high_resolution_clock::now();
-    result.arrangement = compute_envelope_arrangement(
-        result.envelope,
-        options.volume_threshold,
-        options.face_count_threshold);
-    auto arrangement_end = std::chrono::high_resolution_clock::now();
-    logger().info(
-        "Arrangement computation time: {} seconds",
-        std::chrono::duration<double>(arrangement_end - arrangement_start).count());
+    cell_complex::algorithm::compute_silhouette_complex(cellFromGrid, *csgTreePtr);
+    cell_complex::save_obj("silhouette.obj", cellFromGrid);
+    cell_complex::save_msh("silhouette.msh", cellFromGrid);
+    cellFromGrid.validate();
 
-    auto sweep_surface_start = std::chrono::high_resolution_clock::now();
-    result.sweep_surface = extract_sweep_surface_from_arrangement(result.arrangement);
-    auto sweep_surface_end = std::chrono::high_resolution_clock::now();
-    logger().info(
-        "Sweep surface extraction time: {} seconds",
-        std::chrono::duration<double>(sweep_surface_end - sweep_surface_start).count());
+    cell_complex::algorithm::compute_envelope_complex(cellFromGrid, *csgTreePtr);
+    cell_complex::save_obj("envelope.obj", cellFromGrid);
+    cell_complex::save_msh("envelope.msh", cellFromGrid);
+
+    // mtetcol::SimplicialColumn<4> columns;
+    // columns.set_vertices(verts);
+    // columns.set_simplices(simps);
+    // columns.set_time_samples(time_func, values_func);
+    // constexpr Scalar iso_value = 0.0;
+    // auto silhouette_start = std::chrono::high_resolution_clock::now();
+    // auto contour = columns.extract_contour(iso_value, options.cyclic);
+    // auto silhouette_end = std::chrono::high_resolution_clock::now();
+    // logger().info(
+    //     "Silhouette extraction time: {} seconds",
+    //     std::chrono::duration<double>(silhouette_end - silhouette_start).count());
+
+    // if (!contour.is_manifold()) {
+    //     throw std::runtime_error("ERROR: extracted contour is not manifold");
+    // }
+
+    // auto envelope_start = std::chrono::high_resolution_clock::now();
+    // result.envelope = compute_envelope(funcs[0], contour, options);
+    // auto envelope_end = std::chrono::high_resolution_clock::now();
+    // logger().info(
+    //     "Envelope computation time: {} seconds",
+    //     std::chrono::duration<double>(envelope_end - envelope_start).count());
+
+    // auto arrangement_start = std::chrono::high_resolution_clock::now();
+    // result.arrangement = compute_envelope_arrangement(
+    //     result.envelope,
+    //     options.volume_threshold,
+    //     options.face_count_threshold);
+    // auto arrangement_end = std::chrono::high_resolution_clock::now();
+    // logger().info(
+    //     "Arrangement computation time: {} seconds",
+    //     std::chrono::duration<double>(arrangement_end - arrangement_start).count());
+
+    // auto sweep_surface_start = std::chrono::high_resolution_clock::now();
+    // result.sweep_surface = extract_sweep_surface_from_arrangement(result.arrangement);
+    // auto sweep_surface_end = std::chrono::high_resolution_clock::now();
+    // logger().info(
+    //     "Sweep surface extraction time: {} seconds",
+    //     std::chrono::duration<double>(sweep_surface_end - sweep_surface_start).count());
 
     return result;
 }
 
-SweepResult generalized_sweep_from_config(
-        std::filesystem::path function_file,
-        std::filesystem::path config_file)
-{
-    if (!std::filesystem::exists(function_file)) {
-        throw std::runtime_error("ERROR: sweep file does not exist");
-    }
-    if (!std::filesystem::exists(config_file)) {
-        throw std::runtime_error("ERROR: options file does not exist");
-    }
+// SweepResult generalized_sweep_from_config(
+//         std::filesystem::path function_file,
+//         std::filesystem::path config_file)
+// {
+//     if (!std::filesystem::exists(function_file)) {
+//         throw std::runtime_error("ERROR: sweep file does not exist");
+//     }
+//     if (!std::filesystem::exists(config_file)) {
+//         throw std::runtime_error("ERROR: options file does not exist");
+//     }
 
-    sweep::GridSpec grid_spec;
-    sweep::SweepOptions options;
-    load_config(config_file, grid_spec, options);
+//     sweep::GridSpec grid_spec;
+//     sweep::SweepOptions options;
+//     load_config(config_file, grid_spec, options);
 
-    std::shared_ptr<stf::SpaceTimeFunction<3>> func =
-        stf::parse_space_time_function_from_file<3>(function_file.string());
-    auto implicit_sweep = [f = std::move(func)](
-                         Eigen::RowVector4d data) -> std::pair<Scalar, Eigen::RowVector4d> {
-        auto val = f->value({data[0], data[1], data[2]}, data[3]);
-        auto grad = f->gradient({data[0], data[1], data[2]}, data[3]);
-        return {val, {grad[0], grad[1], grad[2], grad[3]}};
-    };
+//     std::shared_ptr<stf::SpaceTimeFunction<3>> func =
+//         stf::parse_space_time_function_from_file<3>(function_file.string());
+//     auto implicit_sweep = [f = std::move(func)](
+//                          Eigen::RowVector4d data) -> std::pair<Scalar, Eigen::RowVector4d> {
+//         auto val = f->value({data[0], data[1], data[2]}, data[3]);
+//         auto grad = f->gradient({data[0], data[1], data[2]}, data[3]);
+//         return {val, {grad[0], grad[1], grad[2], grad[3]}};
+//     };
 
-    std::vector<SpaceTimeFunction> funcs;
-    funcs.push_back(implicit_sweep);
-    CSGFunction temp_csg_f; 
+//     std::vector<SpaceTimeFunction> funcs;
+//     funcs.push_back(implicit_sweep);
+//     CSGFunction temp_csg_f; 
 
-    return generalized_sweep(funcs, temp_csg_f, grid_spec, options);
-}
+//     return generalized_sweep(funcs, temp_csg_f, grid_spec, options);
+// }
 
 } // namespace sweep

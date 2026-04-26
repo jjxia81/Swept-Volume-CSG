@@ -1,0 +1,72 @@
+  type: csg
+  dimension: 3
+  root:
+    op: intersection
+    smooth_distance: 0.0  # Use 0.0 for hard intersection, positive for smooth
+    left:
+      op: intersection
+      smooth_distance: 0.0
+      left:
+        type: sweep
+        primitive:
+          type: plane
+          point: [0.0856967, 0.140342, -0.215199]
+          normal: [0.609769, 0.145174, -0.77917]  
+        transform:
+          type: compose
+          transforms:
+            - type: translation
+              vector: [-2.0, 0.0, 0]   # Translate 
+            - type: rotation
+              axis: [0.0, 1.0, 0.0]
+              angle: -180.0            # Rotate -180 degrees
+              center: [0.0, 0.0, 0.0]  # Rotation center at origin
+      right:
+        type: sweep
+        primitive:
+          type: plane
+          point: [-0.291811, 0.339316, 0.042066]
+          normal: [-0.565192, 0.76556, 0.307369]  
+        transform:
+          type: compose
+          transforms:
+            - type: translation
+              vector: [-2.0, 0.0, 0]   # Translate 
+            - type: rotation
+              axis: [0.0, 1.0, 0.0]
+              angle: -180.0            # Rotate -180 degrees
+              center: [0.0, 0.0, 0.0]  # Rotation center at origin  
+    # Right child
+    right:
+      op: intersection
+      smooth_distance: 0.0
+      left:
+        type: sweep
+        primitive:
+          type: plane
+          point: [0.105485, -0.044463, 0.28148]
+          normal: [0.472371, -0.210437, 0.85591]  
+        transform:
+          type: compose
+          transforms:
+            - type: translation
+              vector: [-2.0, 0.0, 0]   # Translate 
+            - type: rotation
+              axis: [0.0, 1.0, 0.0]
+              angle: -180.0            # Rotate -180 degrees
+              center: [0.0, 0.0, 0.0]  # Rotation center at origin
+      right:
+        type: sweep
+        primitive:
+          type: plane
+          point: [-0.316363, -0.210904, -0.0796635]
+          normal: [-0.583852, -0.768224, -0.262581]  
+        transform:
+          type: compose
+          transforms:
+            - type: translation
+              vector: [-2.0, 0.0, 0]   # Translate 
+            - type: rotation
+              axis: [0.0, 1.0, 0.0]
+              angle: -180.0            # Rotate -180 degrees
+              center: [0.0, 0.0, 0.0]  # Rotation center at origin  

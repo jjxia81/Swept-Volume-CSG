@@ -8,6 +8,7 @@
 #include <limits>
 #include <filesystem>
 #include <string>
+#include <stf/stf.h>
 
 namespace sweep {
 
@@ -30,6 +31,7 @@ using CSGFunction = std::function<std::pair<double, size_t>(Eigen::RowVectorXd)>
 ///
 /// Specification for the 3D spatial grid used in the sweep.
 ///
+
 struct GridSpec {
     /// Resolution of the grid in the x, y, z directions.
     std::array<size_t, 3> resolution = {4, 4, 4};
@@ -152,8 +154,10 @@ struct SweepOptions {
 /// @return          The result of the generalized sweep, including the envelope mesh,
 ///                  the arrangement mesh, and the final sweep surface.
 ///
-SweepResult generalized_sweep(const std::vector<SpaceTimeFunction>& funcs,
+SweepResult generalized_sweep_csg(
+            const std::vector<SpaceTimeFunction>& funcs,
                               CSGFunction csg_f,
+                              stf::CSGTree<3>* csgTreePtr,
                               GridSpec grid_spec = {},
                               SweepOptions options = {});
 

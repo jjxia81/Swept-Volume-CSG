@@ -191,6 +191,10 @@ TEST_CASE("fourSphere3d CSG - value and gradient vs Mathematica reference", "[st
         {-0.2, 0.0,  0.0,  1.0},
         {5.0,  0.0,  0.0,  1.0},
     };
+const std::vector<Scalar> csg_ref_vals = {-0.240306, -0.211271, 0.0645789, -0.0173372, 0.979233, -0.0683892, 
+                                            -0.122494, 0.23087, 0.538864, 0.567899, 0.416911, 7.44561, 1.23289, 
+                                            1.73847, 1.73593, 1.52803, 1.62046, 1.89389, 1.10119, 1.38391};
+
 const std::vector<std::vector<Scalar>> ref_values = {
         // f1
         {-0.240306, -0.211271,  0.0645789, -0.606167, 0.979233,
@@ -314,29 +318,49 @@ const std::vector<std::vector<Scalar>> ref_values = {
     const char* labels[]  = {"df/dx", "df/dy", "df/dz", "df/dt"};
 
     // Collect all leaf node indices via post-order traversal
-    std::vector<int> leaf_indices;
-    func->visit_postorder([&](stf::CSGTree<3>::NodeInfo info) {
-        if (info.is_leaf()) {
-            leaf_indices.push_back(info.node_index);
-            // std::cout << " lead node id " << info.node_index <<std::endl;
-        }
-    });
+
 
     auto pt = test_points[0];
     std::array<Scalar, dim> pos = {pt[0], pt[1], pt[2]};
                     Scalar t = pt[3];
 
+    std::vector<int> leaf_indices;
+    leaf_indices = func->get_leaf_indices();
+
+    std::vector<Scalar> leaf_vals;
+    func->value_with_leaf_cache(pos, t, leaf_vals);
+
+    int winner_order = func->winning_leaf_order(leaf_vals);
+    int winner_node  = leaf_indices[winner_order];  // safe to index directly
+
+    // std::cout << "leaf_vals : " << leaf_vals[0] << " " << leaf_vals[1] << " " << leaf_vals[2] << " "  << leaf_vals[3]<< std::endl;
+    // std::cout << " df index : " << winner_order << std::endl;
+    // std::cout << " df pos     " << winner_node << std::endl;
+ 
     Scalar val = func->value_at(leaf_indices[0], pos, t);
     Scalar ref = ref_values[leaf_indices[0]][0];
 
-    // INFO("point: {" << pt[0] << "," << pt[1] << ","
-    //                                << pt[2] << "," << pt[3] << "}");
-    // std::cout << " csg " << leaf_indices[0] << "  , val " << val << std::endl;
-    // std::cout << " ref  val " << val << std::endl;
-    // return;
+   
 
     REQUIRE(leaf_indices.size() == 4);
 
+    SECTION("csg values vs Mathematica") {
+        for (size_t j = 0; j < test_points.size(); j++) {
+            {
+                const auto& pt = test_points[j];
+                std::array<Scalar, dim> pos = {pt[0], pt[1], pt[2]};
+                Scalar t = pt[3];
+                Scalar val = func->value(pos, t);
+                Scalar ref = csg_ref_vals[j];
+                Scalar diff = std::abs(val - ref);
+                // Always print so you see all results, not just failures
+                INFO("point: {" << pt[0] << "," << pt[1] << "," << pt[2] << "," << pt[3] << "}");
+                INFO("computed=" << val << " ref=" << ref << " diff=" << diff);
+                CHECK(diff < val_tol);
+            }
+        }
+        
+    }
    
     SECTION("subfunction values vs Mathematica") {
         for (int fi = 0; fi < 4; fi++) {
@@ -371,6 +395,55 @@ const std::vector<std::vector<Scalar>> ref_values = {
             }
         }
     }
+
+    SECTION("csg cache values vs Mathematica") {
+
+        for (size_t j = 0; j < test_points.size(); j++) 
+        {
+            const auto& pt = test_points[j];
+            std::array<Scalar, dim> pos = {pt[0], pt[1], pt[2]};
+            Scalar t = pt[3];
+
+            std::vector<Scalar> leaf_vals;
+            func->value_with_leaf_cache(pos, t, leaf_vals);  
+            
+            for(int fi = 0; fi < 4; ++fi)
+            {
+                Scalar val = leaf_vals[fi];
+                Scalar ref = ref_values[fi][j];
+                Scalar diff = std::abs(val - ref);
+
+                INFO("point: {" << pt[0] << "," << pt[1] << "," << pt[2] << "," << pt[3] << "}");
+                INFO("computed=" << val << " ref=" << ref << " diff=" << diff);
+                CHECK(diff < val_tol);
+            }
+        }
+    }
+
+    SECTION("csg dominant function id test vs Mathematica") {
+
+        for (size_t j = 0; j < test_points.size(); j++) 
+        {
+            const auto& pt = test_points[j];
+            std::array<Scalar, dim> pos = {pt[0], pt[1], pt[2]};
+            Scalar t = pt[3];
+
+            std::vector<Scalar> leaf_vals;
+            func->value_with_leaf_cache(pos, t, leaf_vals); 
+            
+            int winner_order = func->winning_leaf_order(leaf_vals);
+
+            Scalar val = leaf_vals[winner_order];
+            Scalar ref = csg_ref_vals[j];
+            Scalar diff = std::abs(val - ref);
+
+            INFO("point: {" << pt[0] << "," << pt[1] << "," << pt[2] << "," << pt[3] << "}");
+            INFO("computed=" << val << " ref=" << ref << " diff=" << diff);
+            CHECK(diff < val_tol);
+            
+        }
+    }
+
     SECTION("subfunction gradients vs Mathematica") {
         for (int fi = 0; fi < 4; fi++) {
             for (size_t j = 0; j < test_points.size(); j++) {

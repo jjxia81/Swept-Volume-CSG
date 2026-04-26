@@ -350,18 +350,16 @@ int main(int argc, const char* argv[])
     // std::function<std::pair<double, size_t>(Eigen::RowVectorXd)> csg_f;
 
     auto result = sweep::generalized_sweep_csg(funcs, csg_f, csgTreePtr, grid_spec, options);
-    auto& envelope = result.envelope;
-    auto& sweep_surface = result.sweep_surface;
-    auto& sweep_arrangement = result.arrangement;
+    // auto& envelope = result.envelope;
+    // auto& sweep_surface = result.sweep_surface;
+    // auto& sweep_arrangement = result.arrangement;
 
     // Saving result
     // auto saving_start = std::chrono::time_point_cast<std::chrono::microseconds>(
     //                         std::chrono::high_resolution_clock::now())
     //                         .time_since_epoch()
     //                         .count();
-
     
-
     // lagrange::io::save_mesh(output_path + "/sweep_surface.obj", sweep_surface); 
     // lagrange::io::save_mesh(output_path + "/envelope.msh", envelope);
     // lagrange::io::save_mesh(output_path + "/sweep_surface.msh", sweep_surface);
@@ -374,11 +372,11 @@ int main(int argc, const char* argv[])
     // vertexMap);
 #endif
 
-    auto saving_end = std::chrono::time_point_cast<std::chrono::microseconds>(
-                          std::chrono::high_resolution_clock::now())
-                          .time_since_epoch()
-                          .count();
-    sweep::logger().info("Saving time: {} seconds", (saving_end - saving_start) * 1e-6);
+    // auto saving_end = std::chrono::time_point_cast<std::chrono::microseconds>(
+    //                       std::chrono::high_resolution_clock::now())
+    //                       .time_since_epoch()
+    //                       .count();
+    // sweep::logger().info("Saving time: {} seconds", (saving_end - saving_start) * 1e-6);
 
     return 0;
 }

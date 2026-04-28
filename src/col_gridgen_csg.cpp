@@ -32,6 +32,8 @@ bool isTemporalRefine = false;
 uint64_t tempRefineVtId = 0; 
 int  tempRefineTimeVal = 0;
 
+bool refine_using_openmp = false; 
+
 /// @param[in] initial_time_samples: initial number of time samples at each vertex. It will be
 /// rounded up to the next power of 2.
 /// @param[in] grid: base 3D grid. For each vertex, build a list of time stamps. For each tet, build a list of extruded 4D simplices
@@ -585,7 +587,7 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
             sc.timeList[ci]    = (sc.tet4DVertsPtr[0]->time + sc.tet4DVertsPtr[4]->time) / 2;
             sc.indList[ci]     = cell5Col[ci].hash[4];
             sc.choiceList[ci]  = choice;
-            // break;
+
         } else {
             sc.subList[ci] = false;
         }
@@ -601,8 +603,28 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
         terminate = true;
         if (sc.choiceList[ci]) {
             if (sc.timeLenList[ci] > MIN_TIME) {
+                
+                double dt_sum = 0; double dx_sum = 0; double dy_sum = 0; double dz_sum = 0; 
+                for(size_t fi = 0; fi < sc.cellDFunc0XIds.cols(); ++ fi)
+                {
+                    if(sc.cellDFunc0XIds(ci,fi) != 0)
+                    {
+                        bind_cell5_verts(cell5Col[ci], sc.baseVertsPtr, sc.tet4DVertsPtr);
+                        const auto& g1s = sc.tet4DVertsPtr[0]->grads;
+                        const auto& g2s = sc.tet4DVertsPtr[1]->grads;
+                        const auto& g3s = sc.tet4DVertsPtr[2]->grads;
+                        const auto& g4s = sc.tet4DVertsPtr[3]->grads;
+                        const auto& g5s = sc.tet4DVertsPtr[4]->grads;
+                        dt_sum += abs(g1s(fi,3)) + abs(g2s(fi,3)) + abs(g3s(fi,3)) + abs(g4s(fi,3)) + abs(g5s(fi,3));
+                        dx_sum += abs(g1s(fi,0)) + abs(g2s(fi,0)) + abs(g3s(fi,0)) + abs(g4s(fi,0)) + abs(g5s(fi,0));
+                        dy_sum += abs(g1s(fi,1)) + abs(g2s(fi,1)) + abs(g3s(fi,1)) + abs(g4s(fi,1)) + abs(g5s(fi,1));
+                        dz_sum += abs(g1s(fi,2)) + abs(g2s(fi,2)) + abs(g3s(fi,2)) + abs(g4s(fi,2)) + abs(g5s(fi,2));
+                    }
+                }
+                double local_time_scale = std::max(1.0, (dt_sum + 0.000001)/( (dx_sum + dy_sum + dz_sum)/ 3 + 0.000001));
+                
                 timeQ.emplace_back(
-                    (double)sc.timeLenList[ci] * time_scale / MAX_TIME,
+                    (double)sc.timeLenList[ci] * local_time_scale / MAX_TIME,
                     tid, tetVids[sc.indList[ci]], (int)sc.timeList[ci]);
                 std::push_heap(timeQ.begin(), timeQ.end(), compTime);
                 // break;
@@ -1052,6 +1074,25 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
         terminate = true;
         if (sc.choiceList[ci]) {
             if (sc.timeLenList[ci] > MIN_TIME) {
+                // double dt_sum = 0; double dx_sum = 0; double dy_sum = 0; double dz_sum = 0; 
+                // for(size_t fi = 0; fi < sc.cellDFunc0XIds.cols(); ++ fi)
+                // {
+                //     if(sc.cellDFunc0XIds(ci,fi) != 0)
+                //     {
+                //         bind_cell5_verts(cell5Col[ci], sc.baseVertsPtr, sc.tet4DVertsPtr);
+                //         const auto& g1s = sc.tet4DVertsPtr[0]->grads;
+                //         const auto& g2s = sc.tet4DVertsPtr[1]->grads;
+                //         const auto& g3s = sc.tet4DVertsPtr[2]->grads;
+                //         const auto& g4s = sc.tet4DVertsPtr[3]->grads;
+                //         const auto& g5s = sc.tet4DVertsPtr[4]->grads;
+                //         dt_sum += abs(g1s(fi,3)) + abs(g2s(fi,3)) + abs(g3s(fi,3)) + abs(g4s(fi,3)) + abs(g5s(fi,3));
+                //         dx_sum += abs(g1s(fi,0)) + abs(g2s(fi,0)) + abs(g3s(fi,0)) + abs(g4s(fi,0)) + abs(g5s(fi,0));
+                //         dy_sum += abs(g1s(fi,1)) + abs(g2s(fi,1)) + abs(g3s(fi,1)) + abs(g4s(fi,1)) + abs(g5s(fi,1));
+                //         dz_sum += abs(g1s(fi,2)) + abs(g2s(fi,2)) + abs(g3s(fi,2)) + abs(g4s(fi,2)) + abs(g5s(fi,2));
+                //     }
+                // }
+                // double local_time_scale = std::max(1.0, (dt_sum + 0.000001)/( (dx_sum + dy_sum + dz_sum)/ 3 + 0.000001));
+                
                 tl.timeQ.emplace_back(
                     (double)sc.timeLenList[ci] * time_scale / MAX_TIME,
                     tid, tetVids[sc.indList[ci]], (int)sc.timeList[ci]);
@@ -1291,8 +1332,8 @@ static void do_temporal_split(
 #if time_profile
         Timer ref_crit_timer(ref_crit, [&](auto t, auto ms) {
             combine_timer(ctx.profileTimer, ctx.profileCount, t, ms); });
-#endif
-        // push_one_col(assocTet, ctx);
+#endif  
+        if(!refine_using_openmp) push_one_col(assocTet, ctx); 
         candidataTetIds_SM.push_back(assocTet);
 #if time_profile
         ref_crit_timer.Stop();
@@ -1324,10 +1365,8 @@ static void do_spatial_split(
     if (insideMap[vs]) {
         return;
     }
-
     splits++;
     spatial_splits++;
-
     const std::array<VertexId, 2> vs_old = grid.get_edge_vertices(eid);
     auto [vid, eid0, eid1] = grid.split_edge(eid);
 
@@ -1345,7 +1384,7 @@ static void do_spatial_split(
             Timer ref_crit_timer(ref_crit, [&](auto timer, auto ms) {
                 combine_timer(ctx.profileTimer, ctx.profileCount, timer, ms); });
 #endif
-            // push_one_col(t, ctx);
+            if(!refine_using_openmp) push_one_col(t, ctx);
             candidataTetIds_SM.push_back(t);
 #if time_profile
             ref_crit_timer.Stop();
@@ -1361,7 +1400,7 @@ static void do_spatial_split(
 //  gridRefine  — now just orchestration
 // ============================================================
 
-bool gridRefineCSGOld(
+bool gridRefineCSG(
     mtet::MTetMesh& grid,
     vertExtrude& vertexMap,
     insidenessMap& insideMap,
@@ -1376,17 +1415,24 @@ bool gridRefineCSGOld(
     std::unordered_map<uint64_t, int>& colActiveMap,
     size_t initial_time_samples,
     double min_tet_radius_ratio,
-    double min_tet_edge_length)
+    double min_tet_edge_length,
+    const std::string& out_dir)
 {
 
     set_csg_val_func(csg_f);
     // initial_time_samples = 16;
     init5CGridCSG(initial_time_samples, grid, funcs, MAX_TIME, vertexMap);
 
-    const double time_scale = calTimeGlobalScaleWithInitGridCSG(vertexMap);
+    const double time_scale = calTimeGlobalScaleWithInitGridCSG(vertexMap) ;
     std::cout << " --- time scale : " << time_scale << std::endl;
     // init shared data 
-    
+    std::string log_path = out_dir + "/run_log.txt";
+    std::ofstream log_file(log_path, std::ios::app);
+    auto file_log = [&](const std::string& msg) {
+        // std::cout << msg << std::endl;
+        if (log_file.is_open()) log_file << msg << std::endl;
+    };
+    file_log(" --- time scale : " + std::to_string(time_scale)); 
     colActiveMapPtr = &colActiveMap;
     // Queues
     std::vector<TimeElem>  timeQ;
@@ -1409,7 +1455,7 @@ bool gridRefineCSGOld(
     // Initial pass
     grid.seq_foreach_tet(
         [&](mtet::TetId tid, [[maybe_unused]] std::span<const mtet::VertexId, 4>) {
-            // push_one_col(tid, ctx);
+            push_one_col(tid, ctx);
             candidataTetIds_SM.push_back(tid);
         });
 
@@ -1420,16 +1466,8 @@ bool gridRefineCSGOld(
     bool has_space_ele = false;
     size_t tempRefineCount = 0;
     size_t spatialRefineCount = 0;
-    
-while(!candidataTetIds_SM.empty())
-{
-    for(int i = 0; i < (int)candidataTetIds_SM.size();  ++i)
-    {
-        auto curTid = candidataTetIds_SM[i];
-        push_one_col(curTid, ctx);
-    }
 
-    candidataTetIds_SM.clear();
+
     // std::cout << " start refineFtCSG  loop " << std::endl;
     while ((!timeQ.empty() || !spaceQ.empty()) && splits < max_splits) {
 
@@ -1454,15 +1492,13 @@ while(!candidataTetIds_SM.empty())
             has_time_ele = false;
             do_temporal_split(time_ele, grid, vertexMap, insideMap, funcs,
                               splits, temporal_splits, ctx);
-            tempRefineCount ++;
         } else {
             has_space_ele = false;
             do_spatial_split(space_ele, grid, vertexMap, insideMap, funcs,
                              splits, spatial_splits, ctx);
-            spatialRefineCount++;
         }
     }
-}
+
     size_t valid_tet_count = 0;
 
     for(auto& ele : colActiveMap)
@@ -1472,21 +1508,20 @@ while(!candidataTetIds_SM.empty())
             valid_tet_count ++;
         }
     }
-
-    std::cout << " --------- temporal refine count :  "<< tempRefineCount << std::endl;
-    std::cout << " --------- spatial refine count :  "<< spatialRefineCount << std::endl;
-
+    std::cout << " --------- temporal refine count :  "<< temporal_splits << std::endl;
+    std::cout << " --------- spatial refine count :  "<< spatial_splits << std::endl;
+    file_log(" --------- temporal refine count :  " + std::to_string(temporal_splits)); 
+    file_log(" --------- spatial refine count : " + std::to_string(spatial_splits)); 
+    log_file.close();
     // std::cout << " --------- active_3d_tet_count "<< valid_tet_count << std::endl;
-
     // std::cout << " --------- 3d_tet_count "<<  << std::endl;
-
     sweep::logger().info(
         "Total splits: {}  Spatial splits: {}  Minimum tet radius ratio: {}",
         splits, spatial_splits, min_tet_ratio);
     return true;
 }
 
-bool gridRefineCSG(
+bool gridRefineCSGParallel(
     mtet::MTetMesh& grid,
     vertExtrude& vertexMap,
     insidenessMap& insideMap,
@@ -1509,9 +1544,8 @@ bool gridRefineCSG(
 
 
     std::string log_path = out_dir + "/run_log.txt";
-    std::ofstream log_file(log_path);
+    std::ofstream log_file(log_path, std::ios::app);
     auto file_log = [&](const std::string& msg) {
-        // std::cout << msg << std::endl;
         if (log_file.is_open()) log_file << msg << std::endl;
     };
 
@@ -1552,6 +1586,7 @@ bool gridRefineCSG(
     bool has_space_ele = false;
     size_t tempRefineCount = 0;
     size_t spatialRefineCount = 0;
+    refine_using_openmp = true;
 
     while (!candidataTetIds_SM.empty()) {
         const int n = (int)candidataTetIds_SM.size();
@@ -1637,12 +1672,10 @@ bool gridRefineCSG(
                 has_time_ele = false;
                 do_temporal_split(time_ele, grid, vertexMap, insideMap, funcs,
                                   splits, temporal_splits, ctx);
-                tempRefineCount++;
             } else {
                 has_space_ele = false;
                 do_spatial_split(space_ele, grid, vertexMap, insideMap, funcs,
                                  splits, spatial_splits, ctx);
-                spatialRefineCount++;
             }
         }
     }
@@ -1652,10 +1685,10 @@ bool gridRefineCSG(
     for (auto& ele : colActiveMap) {
         if (ele.second) valid_tet_count++;
     }
-    std::cout << " --------- temporal refine count :  " << tempRefineCount << std::endl;
-    std::cout << " --------- spatial refine count :  "  << spatialRefineCount << std::endl;
-    file_log(" --------- temporal refine count :  " + std::to_string(tempRefineCount)); 
-    file_log(" --------- spatial refine count : " + std::to_string(spatialRefineCount)); 
+    std::cout << " --------- temporal refine count :  " << temporal_splits << std::endl;
+    std::cout << " --------- spatial refine count :  "  << spatial_splits << std::endl;
+    file_log(" --------- temporal refine count :  " + std::to_string(temporal_splits)); 
+    file_log(" --------- spatial refine count : " + std::to_string(spatial_splits)); 
     log_file.close();
     sweep::logger().info(
         "Total splits: {}  Spatial splits: {}  Minimum tet radius ratio: {}",

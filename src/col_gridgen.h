@@ -69,6 +69,24 @@ bool gridRefineCSG(
     const double min_tet_edge_length,
     const std::string& out_dir);
 
+bool gridRefineCSGParallel(
+    mtet::MTetMesh& grid,
+    vertExtrude& vertexMap,
+    insidenessMap& insideMap,
+    const CSGFuncs& funcs,
+    CSGFunction csg_f,
+    const double threshold,
+    const double traj_threshold,
+    const int max_splits,
+    const int insideness_check,
+    std::array<double, timer_amount>& profileTimer,
+    std::array<size_t, timer_amount>& profileCount,
+    std::unordered_map<uint64_t, int>& colActiveMap,
+    size_t initial_time_samples,
+    const double min_tet_radius_ratio,
+    const double min_tet_edge_length,
+    const std::string& out_dir);
+
 // bool gridRefineCSG(
 //     mtet::MTetMesh& grid,
 //     vertExtrude& vertexMap,

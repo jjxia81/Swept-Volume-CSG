@@ -22,6 +22,7 @@ using namespace mtet;
 
 constexpr int MAX_TIME = 1 << 10; // 1024
 constexpr int MIN_TIME = 1 << 2; //   4
+// constexpr int MIN_TIME = 2; // 2
 constexpr int MAX_CELL_INTERVALS = 4 * (MAX_TIME / MIN_TIME); // 1024
 using MatrixX4dRowMajor =
     Eigen::Matrix<double, Eigen::Dynamic, 4, Eigen::RowMajor>;

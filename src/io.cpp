@@ -130,7 +130,7 @@ void convert_4d_grid_mtetcol(
 
     
     std::string log_path = out_dir + "/run_log.txt";
-    std::ofstream log_file(log_path);
+    std::ofstream log_file(log_path, std::ios::app);
    
     if (log_file.is_open()) 
     {

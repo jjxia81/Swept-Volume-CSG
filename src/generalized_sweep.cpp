@@ -8,9 +8,10 @@
 #include <yaml-cpp/yaml.h>
 #include <stf/stf.h>
 #include <cell_complex/CellComplex.h>
-#include <cell_complex/algorithm/envelope.h>
-#include <cell_complex/algorithm/silhouette.h>
+#include <cell_complex/dominance.h>
 #include <cell_complex/generators.h>
+#include <cell_complex/algorithm/silhouette.h>
+#include <cell_complex/algorithm/envelope.h>
 #include <array>
 #include <chrono>
 #include <vector>
@@ -22,6 +23,7 @@
 #include "post_processing.h"
 #include "cell_msh_io.h"
 #include "cell_obj_io.h"
+#include "cell_grid.h"
 
 namespace sweep {
 
@@ -121,7 +123,7 @@ refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs,
     // std::vector<SpaceTimeFunction>  funcs;
     // funcs.push_back(f);
     
-    if (!gridRefineCSG(
+    if (!gridRefineCSGParallel(
             grid,
             vertexMap,
             insideMap,
@@ -442,14 +444,25 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
                             .time_since_epoch()
                             .count();
 
-    cell_complex::algorithm::compute_silhouette_complex(cellFromGrid, *csgTreePtr);
-    // cell_complex::save_obj(options.out_dir + "/silhouette.obj", cellFromGrid);
-    cell_complex::save_msh(options.out_dir + "/silhouette.msh", cellFromGrid);
+    auto &ccSelect = cellFromGrid;
+    // bool use_config_file = false;
+    // if(use_config_file)
+    // {
+    //     std::string grid_config_path = "/home/jjxia/Documents/projects/Swept-Volume-CSG/data/csg/config_test.yaml";
+    //     auto ccFromFile = cell_complex::load_uniform_grid<4>(grid_config_path);
+    //     logger().info("cell complex successfully generated from config file");
+    //     ccSelect =   ccFromFile;
+    // }
+    
+
+    cell_complex::algorithm::compute_silhouette_complex(ccSelect, *csgTreePtr);
+    // cell_complex::save_obj(options.out_dir + "/silhouette.obj", ccSelect);
+    cell_complex::save_msh(options.out_dir + "/silhouette.msh", ccSelect);
     cellFromGrid.validate();
 
-    cell_complex::algorithm::compute_envelope_complex(cellFromGrid, *csgTreePtr);
-    cell_complex::save_obj(options.out_dir + "/envelope.obj", cellFromGrid);
-    cell_complex::save_msh(options.out_dir + "/envelope.msh", cellFromGrid);
+    cell_complex::algorithm::compute_envelope_complex(ccSelect, *csgTreePtr);
+    cell_complex::save_obj(options.out_dir + "/envelope.obj", ccSelect);
+    cell_complex::save_msh(options.out_dir + "/envelope.msh", ccSelect);
 
     auto saving_end = std::chrono::time_point_cast<std::chrono::microseconds>(
                           std::chrono::high_resolution_clock::now())

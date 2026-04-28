@@ -1,0 +1,13 @@
+version: 1.0.0
+grid:
+  resolution: [4, 4, 4]
+  bbox_min: [-0.5f, -0.75f, -0.75f]
+  bbox_max: [1.5f, 0.75f, 0.75f]
+
+parameters:
+  epsilon_env: 0.01
+  epsilon_sil: 0.01
+  with_snapping: false
+  with_insideness_check: false
+  with_adaptive_refinement: true
+  initial_time_samples: 8

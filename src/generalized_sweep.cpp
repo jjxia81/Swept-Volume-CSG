@@ -12,6 +12,7 @@
 #include <cell_complex/generators.h>
 #include <cell_complex/algorithm/silhouette.h>
 #include <cell_complex/algorithm/envelope.h>
+
 #include <array>
 #include <chrono>
 #include <vector>
@@ -469,6 +470,27 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
                           .time_since_epoch()
                           .count();
     sweep::logger().info("Surfacing and save time: {} seconds", (saving_end - saving_start) * 1e-6);
+
+    // Convert envelope cell complex -> lagrange mesh with "time" attribute
+
+    // Triangulate polygonal 2-cells in place
+    cell_complex::triangulate_all_2cells(ccSelect);
+
+    auto envelope_mesh = envelope_complex_to_mesh<Scalar, uint32_t>(ccSelect);
+
+    // Compute arrangement (self-intersection resolution + cell labeling)
+    result.arrangement = compute_envelope_arrangement<Scalar, uint32_t>(
+        envelope_mesh,
+        options.volume_threshold,
+        options.face_count_threshold);
+
+    // Extract the valid (winding-number boundary) facets as the sweep surface
+    result.sweep_surface = extract_sweep_surface_from_arrangement<Scalar, uint32_t>(
+        result.arrangement);
+
+    // Save (lagrange has its own IO; e.g. save_mesh or your own writer)
+    // lagrange::io::save_mesh(options.out_dir + "/sweep_surface.obj", sweep_surface);
+
     // mtetcol::SimplicialColumn<4> columns;
     // columns.set_vertices(verts);
     // columns.set_simplices(simps);

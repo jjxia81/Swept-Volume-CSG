@@ -352,7 +352,7 @@ int main(int argc, const char* argv[])
 
     auto result = sweep::generalized_sweep_csg(funcs, csg_f, csgTreePtr, grid_spec, options);
     // auto& envelope = result.envelope;
-    // auto& sweep_surface = result.sweep_surface;
+    auto& sweep_surface = result.sweep_surface;
     // auto& sweep_arrangement = result.arrangement;
 
     // Saving result
@@ -361,7 +361,7 @@ int main(int argc, const char* argv[])
     //                         .time_since_epoch()
     //                         .count();
     
-    // lagrange::io::save_mesh(output_path + "/sweep_surface.obj", sweep_surface); 
+    lagrange::io::save_mesh(output_path + "/sweep_surface.obj", sweep_surface); 
     // lagrange::io::save_mesh(output_path + "/envelope.msh", envelope);
     // lagrange::io::save_mesh(output_path + "/sweep_surface.msh", sweep_surface);
     // lagrange::io::save_mesh(output_path + "/arrangement.msh", sweep_arrangement);

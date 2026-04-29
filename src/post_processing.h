@@ -7,6 +7,7 @@
 
 #ifndef post_processing_h
 #define post_processing_h
+
 #include <ankerl/unordered_dense.h>
 #include <arrangement/Arrangement.h>
 #include <lagrange/SurfaceMesh.h>
@@ -15,6 +16,7 @@
 #include <lagrange/views.h>
 
 #include <algorithm>
+#include "cell_msh_io.h"
 
 template <typename Scalar, typename Index>
 lagrange::SurfaceMesh<Scalar, Index> isocontour_to_mesh(mtetcol::Contour<4>& isocontour)
@@ -82,7 +84,7 @@ lagrange::SurfaceMesh<Scalar, Index> isocontour_to_mesh(mtetcol::Contour<4>& iso
 
 template <typename Scalar, typename Index>
 lagrange::SurfaceMesh<Scalar, Index> compute_envelope_arrangement(
-    const lagrange::SurfaceMesh<Scalar, Index>& envelope,
+    const lagrange::SurfaceMesh<Scalar, Index>& envelope, 
     Scalar vol_threshold,
     size_t face_count_threshold)
 {
@@ -360,6 +362,75 @@ lagrange::SurfaceMesh<Scalar, Index> extract_sweep_surface_from_arrangement(
 
     lagrange::remove_isolated_vertices(sweep_surface);
     return sweep_surface;
+}
+
+template <typename Scalar, typename Index>
+lagrange::SurfaceMesh<Scalar, Index> envelope_complex_to_mesh(
+    const cell_complex::CellComplex<4>& cc)
+{
+    using namespace cell_complex;
+    lagrange::SurfaceMesh<Scalar, Index> mesh;
+
+    // --- vertices: slot key index -> 0-based mesh index ---
+    auto& vertices = cc.template get_cells<0>();
+    const Index num_vertices = static_cast<Index>(vertices.size());
+    mesh.add_vertices(num_vertices);
+
+    mesh.template create_attribute<Scalar>(
+        "time",
+        lagrange::AttributeElement::Vertex,
+        lagrange::AttributeUsage::Scalar,
+        1);
+    auto time_values = lagrange::attribute_vector_ref<Scalar>(mesh, "time");
+
+    ankerl::unordered_dense::map<size_t, Index> vertex_to_idx;
+    vertex_to_idx.reserve(num_vertices);
+
+    Index vi = 0;
+    for (const auto& [key, vref] : vertices.items()) {
+        const auto& v = vref.get();
+        vertex_to_idx[get_index<0, 4>(key)] = vi;
+        auto pos = mesh.ref_position(vi);
+        pos[0] = static_cast<Scalar>(v.coordinates[0]);
+        pos[1] = static_cast<Scalar>(v.coordinates[1]);
+        pos[2] = static_cast<Scalar>(v.coordinates[2]);
+        time_values[vi] = static_cast<Scalar>(v.coordinates[3]);
+        ++vi;
+    }
+
+    // --- facets: walk each 2-cell's boundary cycle directly ---
+    auto& faces = cc.template get_cells<2>();
+    lagrange::SmallVector<Index, 16> polygon;
+
+    for (auto& [face_key, fref] : faces.items()) {
+        const auto& face = fref.get();
+
+        // Reconstruct ordered boundary cycle of edges
+        auto ordered = detail::build_ordered_boundary_cycle<4>(cc, face.boundary);
+
+        polygon.clear();
+        polygon.reserve(ordered.size());
+        for (const auto& edge_key : ordered) {
+            auto [tail, head] = detail::get_edge_directed_endpoints<4>(cc, edge_key);
+            auto it = vertex_to_idx.find(get_index<0, 4>(tail));
+            if (it == vertex_to_idx.end())
+                throw std::runtime_error("Vertex not found in envelope mesh map");
+            polygon.push_back(it->second);
+        }
+
+        // Apply 2-cell's stored orientation: Negative reverses winding
+        auto face_key_pos = set_orientation<2, 4>(face_key, Orientation::Positive);
+        // (iteration keys typically have Unknown orientation; we want the *intrinsic* one,
+        //  which the cycle already encodes — so just check the key as iterated.)
+        if (get_orientation<2, 4>(face_key) == Orientation::Negative) {
+            std::reverse(polygon.begin(), polygon.end());
+        }
+        (void)face_key_pos;
+
+        mesh.add_polygon({polygon.data(), polygon.size()});
+    }
+
+    return mesh;
 }
 
 #endif /* post_processing_h */

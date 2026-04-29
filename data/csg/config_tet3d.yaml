@@ -10,6 +10,7 @@ parameters:
   epsilon_env: 0.005
   epsilon_sil: 0.002
   with_snapping: false
-  with_insideness_check: false
+  with_insideness_check: true
   with_adaptive_refinement: true
   initial_time_samples: 8
+  min_tet_edge_length: 0.1

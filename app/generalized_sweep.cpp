@@ -255,7 +255,7 @@ int main(int argc, const char* argv[])
         args.function_file = "/home/jjxia/Documents/projects/Swept-Volume-CSG/data/csg/tet3d.yaml";
     }
     
-    if(args.function_file != "" && !input_csg_funcs) {
+    if(args.function_file != "" ) {
         
         if (std::filesystem::exists(args.function_file) &&
             std::filesystem::is_regular_file(args.function_file)) 
@@ -274,8 +274,12 @@ int main(int argc, const char* argv[])
             // fileCSGFunc = stf::YamlParser<3>::parse_csg_from_file(args.function_file);
             // stf::CSGTree<3>* csg = fileCSGFunc.get(); 
             csgTreePtr->build_flat_plan();
-            csg_f = make_csg_function(*csgTreePtr);
-            funcs = make_leaf_functions(*csgTreePtr);
+            if(!input_csg_funcs)
+            {
+                csg_f = make_csg_function(*csgTreePtr);
+                funcs = make_leaf_functions(*csgTreePtr);
+            }
+            
            
         }  else {
             sweep::logger().info("The input CSG function file does not exist. ");
@@ -300,9 +304,11 @@ int main(int argc, const char* argv[])
     sweep::SweepOptions options;
     options.out_dir = output_path;
 
+    std::cout << " config file path : " << args.config_file << std::endl;
     if (args.config_file != "") {
         load_config(args.config_file, grid_spec, options);
     } else {
+
         // Extracting options from command line arguments
         options.epsilon_env = threshold;
         options.epsilon_sil = traj_threshold;
@@ -310,9 +316,10 @@ int main(int argc, const char* argv[])
         options.with_insideness_check = insideness_check;
         options.with_snapping = !args.without_snapping;
         options.cyclic = args.cyclic;
+        grid_spec.bbox_max = csgfTet::bbox_max;
+        grid_spec.bbox_min = csgfTet::bbox_min;
     }
-    grid_spec.bbox_max = csgfTet::bbox_max;
-    grid_spec.bbox_min = csgfTet::bbox_min;
+    
     
     if(input_csg_funcs)
     {
@@ -327,8 +334,8 @@ int main(int argc, const char* argv[])
         funcs.push_back(csgfTet::tet_f2);
         funcs.push_back(csgfTet::tet_f3);
         funcs.push_back(csgfTet::tet_f4);
-        grid_spec.bbox_max = csgfTet::bbox_max;
-        grid_spec.bbox_min = csgfTet::bbox_min;
+        // grid_spec.bbox_max = csgfTet::bbox_max;
+        // grid_spec.bbox_min = csgfTet::bbox_min;
         // funcs.push_back(implicit_sweep);
     } else {
         // funcs.push_back(implicit_sweep);

@@ -17,6 +17,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 
 set(FAST_ARRANGEMENT_ENABLE_PARALLEL OFF CACHE BOOL "" FORCE)
 set(GEO_ENABLE_THREADS               OFF CACHE BOOL "" FORCE)
+set(SPDLOG_USE_STD_FORMAT OFF CACHE BOOL "" FORCE)
 
 find_package(OpenMP REQUIRED)
 
@@ -107,19 +108,27 @@ if (GEN_SWEEP_TESTS)
  target_link_libraries(sweep_volume_test
     PRIVATE 
     sweep
-    stf
     Catch2::Catch2
     mtet::mtet
     mtetcol::mtetcol
     unordered_dense::unordered_dense
     smallvector::smallvector
-    igl)
+    igl::core
+    stf::stf
+    lagrange::core
+    lagrange::io
+    nlohmann_json::nlohmann_json
+    mshio::mshio
+    cell_complex::cell_complex)
  target_compile_features(sweep_volume_test PRIVATE cxx_std_20)
+ target_include_directories(sweep_volume_test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src ${CMAKE_CURRENT_LIST_DIR}/app/include)
  target_compile_definitions(sweep_volume_test PRIVATE CATCH_CONFIG_ENABLE_BENCHMARKING)
 target_compile_definitions(
     sweep_volume_test
     PRIVATE                   
     -DTEST_FILE="${CMAKE_CURRENT_LIST_DIR}/data"
+    -DDATA_DIR="${CMAKE_CURRENT_LIST_DIR}/data"
+    -DEXAMPLE_DIR="${CMAKE_CURRENT_LIST_DIR}/example"
 )
  catch_discover_tests(sweep_volume_test)
 endif()

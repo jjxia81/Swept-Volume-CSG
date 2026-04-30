@@ -13,10 +13,13 @@
 #include <lagrange/SurfaceMesh.h>
 #include <lagrange/mesh_cleanup/remove_isolated_vertices.h>
 #include <lagrange/utils/SmallVector.h>
+#include <lagrange/utils/invalid.h>
 #include <lagrange/views.h>
+#include <sweep/logger.h>
 
 #include <algorithm>
 #include "cell_msh_io.h"
+#include <chrono>
 
 template <typename Scalar, typename Index>
 lagrange::SurfaceMesh<Scalar, Index> isocontour_to_mesh(mtetcol::Contour<4>& isocontour)
@@ -296,6 +299,237 @@ lagrange::SurfaceMesh<Scalar, Index> compute_envelope_arrangement(
             if (feature_edge) is_feature[eid] = 1;
         }
     }
+
+    // Inherit envelope edge labels onto the arrangement edges.
+    //
+    // For each output arrangement edge `eid`, collect the parents (envelope
+    // facet ids) of every incident arrangement facet. Drop parents with
+    // multiplicity > 1 (those parents are interior-split by `eid`, so they
+    // don't identify a parent envelope edge). The remaining set `F_U`
+    // narrows the candidate input edges for a geometric check.
+    //
+    // The topological rule picks a single candidate (the shared-by-all edge
+    // when |F_U|>=2, or the unique boundary edge when |F_U|==1). A sanity
+    // gate confirms that candidate is geometrically on the output edge;
+    // otherwise, or when the topological rule is ambiguous, a geometric
+    // fallback searches all F_U parent edges for the nearest within
+    // tolerance. Edges with |F_U|==0 or no nearby candidate are left as
+    // invalid<Index>().
+    sweep_arrangement.template create_attribute<Index>(
+        "envelope_edge_id",
+        lagrange::AttributeElement::Edge,
+        lagrange::AttributeUsage::Scalar,
+        1);
+    auto envelope_edge_id =
+        attribute_vector_ref<Index>(sweep_arrangement, "envelope_edge_id");
+    const Index invalid_id = lagrange::invalid<Index>();
+    envelope_edge_id.setConstant(invalid_id);
+
+    std::vector<Index> parents; // reused per edge
+    parents.reserve(8);
+    std::vector<Index> f_u; // elements of `parents` with multiplicity 1
+    f_u.reserve(8);
+
+    // Small helper: return true iff envelope facet `p` has `e_in` as one of
+    // its three edges.
+    auto facet_has_edge = [&](Index p, Index e_in) -> bool {
+        Index cb = envelope.get_facet_corner_begin(p);
+        for (Index k = 0; k < 3; k++) {
+            Index u0 = envelope.get_corner_vertex(cb + k);
+            Index u1 = envelope.get_corner_vertex(cb + (k + 1) % 3);
+            Index e = envelope.find_edge_from_vertices(u0, u1);
+            if (e == e_in) return true;
+        }
+        return false;
+    };
+
+    // Geometry for the sanity gate and geometric fallback. `V` is the
+    // envelope vertex matrix cast to double; `out_vertices` is the
+    // arrangement vertex matrix from the engine.
+    //
+    // `envelope_edge_id_rel_tol` scales the bbox diagonal to get an absolute
+    // tolerance.
+    constexpr double envelope_edge_id_rel_tol = 1e-6;
+
+    const auto& V_env_dbl = V;
+    const auto& V_arr_dbl = out_vertices;
+    Eigen::Matrix<double, 3, 1> bb_min_geo = V_env_dbl.colwise().minCoeff().transpose();
+    Eigen::Matrix<double, 3, 1> bb_max_geo = V_env_dbl.colwise().maxCoeff().transpose();
+    double bbox_diag_geo = (bb_max_geo - bb_min_geo).norm();
+    double geom_tol = envelope_edge_id_rel_tol * bbox_diag_geo;
+
+    auto dist_point_to_segment =
+        [](const Eigen::Matrix<double, 3, 1>& P,
+           const Eigen::Matrix<double, 3, 1>& A,
+           const Eigen::Matrix<double, 3, 1>& B) -> double {
+        Eigen::Matrix<double, 3, 1> AB = B - A;
+        double ab2 = AB.squaredNorm();
+        if (ab2 < 1e-30) return (P - A).norm();
+        double t = (P - A).dot(AB) / ab2;
+        t = std::max(0.0, std::min(1.0, t));
+        return (P - (A + t * AB)).norm();
+    };
+
+    // Max of the two endpoint-to-segment distances from arrangement edge
+    // (u0, u1) to input envelope edge `e_in`.
+    auto max_endpoint_dist = [&](Index u0, Index u1, Index e_in) -> double {
+        auto [iv0, iv1] = envelope.get_edge_vertices(e_in);
+        Eigen::Matrix<double, 3, 1> A = V_env_dbl.row(iv0).transpose();
+        Eigen::Matrix<double, 3, 1> B = V_env_dbl.row(iv1).transpose();
+        Eigen::Matrix<double, 3, 1> P0 = V_arr_dbl.row(u0).transpose();
+        Eigen::Matrix<double, 3, 1> P1 = V_arr_dbl.row(u1).transpose();
+        double d0 = dist_point_to_segment(P0, A, B);
+        double d1 = dist_point_to_segment(P1, A, B);
+        return std::max(d0, d1);
+    };
+
+    size_t count_valid = 0;
+
+    auto edge_label_start = std::chrono::high_resolution_clock::now();
+
+    for (Index eid = 0; eid < num_edges; eid++) {
+        parents.clear();
+        sweep_arrangement.foreach_facet_around_edge(eid, [&](Index fid) {
+            parents.push_back(envelope_facet_id[fid]);
+        });
+
+        // Build F_U: elements of `parents` with multiplicity 1.
+        f_u.clear();
+        for (size_t i = 0; i < parents.size(); i++) {
+            size_t occ = 0;
+            for (size_t j = 0; j < parents.size(); j++) {
+                if (parents[j] == parents[i]) occ++;
+            }
+            if (occ == 1) f_u.push_back(parents[i]);
+        }
+
+        auto [u0, u1] = sweep_arrangement.get_edge_vertices(eid);
+        Index label = invalid_id;
+
+        // Full-geometry fallback: scan all input edges of all F_U parents,
+        // pick the nearest to the arrangement edge, accept if <= tol.
+        auto geometric_fallback_over_f_u = [&]() {
+            double best_dist = std::numeric_limits<double>::infinity();
+            Index best_edge = invalid_id;
+            for (Index p : f_u) {
+                Index cb_p = envelope.get_facet_corner_begin(p);
+                for (Index k = 0; k < 3; k++) {
+                    Index v0 = envelope.get_corner_vertex(cb_p + k);
+                    Index v1 = envelope.get_corner_vertex(cb_p + (k + 1) % 3);
+                    Index e_in = envelope.find_edge_from_vertices(v0, v1);
+                    if (e_in == invalid_id) continue;
+                    double d = max_endpoint_dist(u0, u1, e_in);
+                    if (d < best_dist) {
+                        best_dist = d;
+                        best_edge = e_in;
+                    }
+                }
+            }
+            if (best_dist <= geom_tol) {
+                label = best_edge;
+            }
+        };
+
+        if (f_u.size() == 1) {
+            Index p = f_u[0];
+            Index cb = envelope.get_facet_corner_begin(p);
+            // Collect all boundary input edges of p.
+            lagrange::SmallVector<Index, 3> boundary_edges;
+            for (Index k = 0; k < 3; k++) {
+                Index v0 = envelope.get_corner_vertex(cb + k);
+                Index v1 = envelope.get_corner_vertex(cb + (k + 1) % 3);
+                Index e_in = envelope.find_edge_from_vertices(v0, v1);
+                if (e_in == invalid_id) continue;
+                if (envelope.count_num_corners_around_edge(e_in) == 1) {
+                    boundary_edges.push_back(e_in);
+                }
+            }
+            if (boundary_edges.size() == 1) {
+                // Sanity gate: confirm the topological pick is geometrically on
+                // the output edge. If not, fall through to the geometric search.
+                Index candidate = boundary_edges[0];
+                if (max_endpoint_dist(u0, u1, candidate) <= geom_tol) {
+                    label = candidate;
+                } else {
+                    geometric_fallback_over_f_u();
+                }
+            } else if (boundary_edges.size() >= 2) {
+                // Multiple boundary candidates: pick the nearest within tol.
+                double best_dist = std::numeric_limits<double>::infinity();
+                Index best_edge = invalid_id;
+                for (Index e_in : boundary_edges) {
+                    double d = max_endpoint_dist(u0, u1, e_in);
+                    if (d < best_dist) {
+                        best_dist = d;
+                        best_edge = e_in;
+                    }
+                }
+                if (best_dist <= geom_tol) {
+                    label = best_edge;
+                }
+            }
+        } else if (f_u.size() >= 2) {
+            Index p0 = f_u[0];
+            Index cb = envelope.get_facet_corner_begin(p0);
+            // Collect input edges of p0 that are shared by all of F_U.
+            lagrange::SmallVector<Index, 3> shared_edges;
+            for (Index k = 0; k < 3; k++) {
+                Index v0 = envelope.get_corner_vertex(cb + k);
+                Index v1 = envelope.get_corner_vertex(cb + (k + 1) % 3);
+                Index e_in = envelope.find_edge_from_vertices(v0, v1);
+                if (e_in == invalid_id) continue;
+                bool shared_by_all = true;
+                for (size_t i = 1; i < f_u.size(); i++) {
+                    if (!facet_has_edge(f_u[i], e_in)) {
+                        shared_by_all = false;
+                        break;
+                    }
+                }
+                if (shared_by_all) shared_edges.push_back(e_in);
+            }
+            if (shared_edges.size() == 1) {
+                // Sanity gate: coplanar-parent overlaps can make the
+                // topologically-shared edge geometrically off the output edge.
+                Index candidate = shared_edges[0];
+                if (max_endpoint_dist(u0, u1, candidate) <= geom_tol) {
+                    label = candidate;
+                } else {
+                    geometric_fallback_over_f_u();
+                }
+            } else if (shared_edges.size() >= 2) {
+                // Multiple shared candidates: pick the nearest within tol.
+                double best_dist = std::numeric_limits<double>::infinity();
+                Index best_edge = invalid_id;
+                for (Index e_in : shared_edges) {
+                    double d = max_endpoint_dist(u0, u1, e_in);
+                    if (d < best_dist) {
+                        best_dist = d;
+                        best_edge = e_in;
+                    }
+                }
+                if (best_dist <= geom_tol) {
+                    label = best_edge;
+                }
+            } else {
+                // No topological match. Fall back to the geometric search.
+                geometric_fallback_over_f_u();
+            }
+        }
+
+        envelope_edge_id[eid] = label;
+        if (label != invalid_id) count_valid++;
+    }
+
+    auto edge_label_end = std::chrono::high_resolution_clock::now();
+    double edge_label_seconds =
+        std::chrono::duration<double>(edge_label_end - edge_label_start).count();
+
+    sweep::logger().info(
+        "Edge-label inheritance: {} / {} edges [{:.4f} s]",
+        count_valid,
+        num_edges,
+        edge_label_seconds);
+
 
     return sweep_arrangement;
 }

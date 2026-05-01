@@ -3,6 +3,10 @@
 #include <Eigen/Core>
 #include <numbers>
 
+#ifndef M_PI
+#define M_PI std::numbers::pi
+#endif
+
 namespace csgf {
 
 using Scalar = double;

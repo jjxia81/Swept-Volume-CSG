@@ -375,6 +375,68 @@ void load_config(std::filesystem::path config_path,
     }
 }
 
+using FaceKey = cell_complex::Cell<2, 4>::KeyType;
+using EdgeKey = cell_complex::Cell<1, 4>::KeyType;
+
+void extraceFeatureLinesFromCC(cell_complex::CellComplex<4> &ccSelect, 
+                            const size_t root_start, const size_t num_leafs,
+                            std::vector<EdgeKey>& junction_edges,
+                            std::vector<int>& edges_labels)
+{
+    // Build edge-raw-index → neighbouring face keys
+    
+    cell_complex::compute_dominance(ccSelect);
+
+    ankerl::unordered_dense::map<size_t, std::vector<FaceKey>> edge_to_faces;
+    for (const auto& [face_key, face_ref] : ccSelect.get_cells<2>().items()) {
+        for (const auto& bd_key : face_ref.get().boundary) {
+            edge_to_faces[cell_complex::get_index<1, 4>(bd_key)].push_back(face_key);
+        }
+    }
+    // Helper:generate_edge_label by their face labels 
+    // face labels : 1, 2, 3, 4; 
+    // {*, 3} or {3, *} -> 0
+    // cap - cap {1, 1} or {2, 2} -> 1
+    // cap - EqF {1, 4}, {4, 1}, {2, 4} or {4, 2} -> 2
+    // EqF - EqF {2, 2} -> 3
+    auto generate_edge_label = [](const cell_complex::Cell<2, 4>& f0, const cell_complex::Cell<2, 4>& f1) {
+        if(f0.label == 3 || f1.label == 3) return 0;
+        if(f0.label == 2 && f1.label == 2) return 1;
+        if(f0.label == 1 && f1.label == 1) return 1;
+        if(f0.label + f1.label == 3 ) return 1;
+        if(f0.label + f1.label == 5 || f0.label + f1.label == 6) return 2;  
+        if(f0.label == 4 && f1.label == 4) return 3;
+        return 0; 
+    };
+    auto edge_map = ccSelect.get_cells<1>().items();
+    auto is_silhouette = [](const cell_complex::Cell<2, 4>& f)
+    {
+        return f.label == 3;
+    };
+    
+    for (const auto& [edge_key, edge_ref] : ccSelect.get_cells<1>().items()) {
+        size_t raw = cell_complex::get_index<1, 4>(edge_key);
+        auto it = edge_to_faces.find(raw);
+        if (it == edge_to_faces.end() || it->second.size() != 2) continue;
+   
+        const auto& f0 = ccSelect.get_cell<2>(it->second[0]);
+        const auto& f1 = ccSelect.get_cell<2>(it->second[1]);
+        if( is_silhouette(f0) || is_silhouette(f1))
+        continue;
+        auto f0DomData = cell_complex::get_chunk(f0.dominance, root_start, num_leafs);
+        auto f1DomData = cell_complex::get_chunk(f1.dominance, root_start, num_leafs);
+        bool diff_sweep =  f0DomData != f1DomData;
+        if (diff_sweep) 
+        {
+            junction_edges.push_back(edge_key);
+            int edge_label = generate_edge_label(f0, f1);
+            edges_labels.push_back(edge_label);
+        }
+    }
+    logger().info("Found {} junction edges ({} sil-sil + sil-cap)",
+                junction_edges.size(), junction_edges.size());
+}
+
 SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs, 
         CSGFunction csg_f, 
         stf::CSGTree<3>* csgTreePtr,
@@ -458,79 +520,88 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
 
     cell_complex::algorithm::compute_silhouette_complex(ccSelect, *csgTreePtr);
     // cell_complex::save_obj(options.out_dir + "/silhouette.obj", ccSelect);
-    cell_complex::save_msh(options.out_dir + "/silhouette.msh", ccSelect);
+    // cell_complex::save_msh(options.out_dir + "/silhouette.msh", ccSelect);
     cellFromGrid.validate();
 
+    // Alternative: select edges where the root-level dominance spans >1 leaf
+    size_t num_leafs = funcs.size();
+    size_t root_start = csgTreePtr->get_root_index() * num_leafs;
+
     cell_complex::algorithm::compute_envelope_complex(ccSelect, *csgTreePtr);
+
     cell_complex::save_obj(options.out_dir + "/envelope.obj", ccSelect);
     cell_complex::save_msh(options.out_dir + "/envelope.msh", ccSelect);
+    
+    
 
+    // Convert envelope cell complex -> lagrange mesh with "time" attribute
+    // Triangulate polygonal 2-cells in place
+    cell_complex::triangulate_all_2cells(ccSelect);
+    // auto envelope_mesh = envelope_complex_to_mesh<Scalar, uint32_t>(ccSelect);
+    // auto envelope_mesh = envelope_complex_to_mesh<Scalar, uint32_t>
+    //         (ccSelect, root_start, num_leafs, junction_raw_ids);
+    // cell_complex::compute_dominance(ccSelect);
+    std::vector<EdgeKey> junction_edges;
+    std::vector<int> edges_labels;
+    extraceFeatureLinesFromCC(ccSelect, root_start, num_leafs, junction_edges, edges_labels);
+    
+    cell_complex::save_edges_to_ply<4>(
+    options.out_dir + "/feature_edges_from_ccEnvelop.ply",
+    junction_edges,
+    edges_labels,
+    ccSelect);
+    // cell_complex::save_edges_to_obj(options.out_dir + "/feature_edges_from_ccEnvelop.obj", junction_edges, ccSelect);
+    cell_complex::save_edges_to_mathematica(options.out_dir + "/feature_edges_from_ccEnvelop.m",
+    junction_edges,
+    edges_labels,
+    ccSelect);
     auto saving_end = std::chrono::time_point_cast<std::chrono::microseconds>(
                           std::chrono::high_resolution_clock::now())
                           .time_since_epoch()
                           .count();
-    sweep::logger().info("Surfacing and save time: {} seconds", (saving_end - saving_start) * 1e-6);
+    logger().info("Surfacing and save time: {} seconds", (saving_end - saving_start) * 1e-6);
 
-    // Convert envelope cell complex -> lagrange mesh with "time" attribute
-
-    // Triangulate polygonal 2-cells in place
-    cell_complex::triangulate_all_2cells(ccSelect);
-
-    auto envelope_mesh = envelope_complex_to_mesh<Scalar, uint32_t>(ccSelect);
-
+    // ankerl::unordered_dense::set<size_t> junction_raw_ids;
+    // junction_raw_ids.reserve(junction_edges.size());
+    // for (const auto& ek : junction_edges) {
+    //     junction_raw_ids.insert(cell_complex::get_index<1, 4>(ek));
+    // }
+    ankerl::unordered_dense::map<size_t, int> junction_label_map;
+    junction_label_map.reserve(junction_edges.size());
+    for (size_t i = 0; i < junction_edges.size(); ++i) {
+        junction_label_map.emplace(
+            cell_complex::get_index<1, 4>(junction_edges[i]),
+            edges_labels[i]);
+    }
+    
+    auto envelope_mesh = envelope_complex_to_mesh2<Scalar, uint32_t>
+            (ccSelect, root_start, num_leafs, junction_label_map);
     // Compute arrangement (self-intersection resolution + cell labeling)
-    result.arrangement = compute_envelope_arrangement<Scalar, uint32_t>(
+    result.arrangement = compute_envelope_arrangement2<Scalar, uint32_t>(
         envelope_mesh,
         options.volume_threshold,
         options.face_count_threshold);
-
     // Extract the valid (winding-number boundary) facets as the sweep surface
-    result.sweep_surface = extract_sweep_surface_from_arrangement<Scalar, uint32_t>(
+    result.sweep_surface = extract_sweep_surface_from_arrangement2<Scalar, uint32_t>(
         result.arrangement);
 
-    // Save (lagrange has its own IO; e.g. save_mesh or your own writer)
-    // lagrange::io::save_mesh(options.out_dir + "/sweep_surface.obj", sweep_surface);
+    // After result.sweep_surface is finalized:
+    // save_feature_edges_obj(options.out_dir + "/sweep_features_lines.obj", result.sweep_surface);
 
-    // mtetcol::SimplicialColumn<4> columns;
-    // columns.set_vertices(verts);
-    // columns.set_simplices(simps);
-    // columns.set_time_samples(time_func, values_func);
-    // constexpr Scalar iso_value = 0.0;
-    // auto silhouette_start = std::chrono::high_resolution_clock::now();
-    // auto contour = columns.extract_contour(iso_value, options.cyclic);
-    // auto silhouette_end = std::chrono::high_resolution_clock::now();
-    // logger().info(
-    //     "Silhouette extraction time: {} seconds",
-    //     std::chrono::duration<double>(silhouette_end - silhouette_start).count());
+    // And/or for is_junction:
+    // save_feature_edges_obj(
+    //     options.out_dir + "/sweep_junctions_lines.obj",
+    //     result.sweep_surface,
+    //     "is_junction");
+    
+    save_labeled_edges_ply<Scalar, uint32_t>(
+    options.out_dir + "/sweep_feature_edges_labeled.ply",
+    result.sweep_surface);
 
-    // if (!contour.is_manifold()) {
-    //     throw std::runtime_error("ERROR: extracted contour is not manifold");
-    // }
-
-    // auto envelope_start = std::chrono::high_resolution_clock::now();
-    // result.envelope = compute_envelope(funcs[0], contour, options);
-    // auto envelope_end = std::chrono::high_resolution_clock::now();
-    // logger().info(
-    //     "Envelope computation time: {} seconds",
-    //     std::chrono::duration<double>(envelope_end - envelope_start).count());
-
-    // auto arrangement_start = std::chrono::high_resolution_clock::now();
-    // result.arrangement = compute_envelope_arrangement(
-    //     result.envelope,
-    //     options.volume_threshold,
-    //     options.face_count_threshold);
-    // auto arrangement_end = std::chrono::high_resolution_clock::now();
-    // logger().info(
-    //     "Arrangement computation time: {} seconds",
-    //     std::chrono::duration<double>(arrangement_end - arrangement_start).count());
-
-    // auto sweep_surface_start = std::chrono::high_resolution_clock::now();
-    // result.sweep_surface = extract_sweep_surface_from_arrangement(result.arrangement);
-    // auto sweep_surface_end = std::chrono::high_resolution_clock::now();
-    // logger().info(
-    //     "Sweep surface extraction time: {} seconds",
-    //     std::chrono::duration<double>(sweep_surface_end - sweep_surface_start).count());
-
+    save_sweep_surface_ply<Scalar, uint32_t>(
+    options.out_dir + "/sweep_surface_labeled.ply",
+    result.sweep_surface);
+    
     return result;
 }
 

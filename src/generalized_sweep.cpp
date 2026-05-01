@@ -477,6 +477,8 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     cell_complex::triangulate_all_2cells(ccSelect);
 
     auto envelope_mesh = envelope_complex_to_mesh<Scalar, uint32_t>(ccSelect);
+    envelope_mesh.initialize_edges();
+    result.envelope = envelope_mesh;
 
     // Compute arrangement (self-intersection resolution + cell labeling)
     result.arrangement = compute_envelope_arrangement<Scalar, uint32_t>(
@@ -534,35 +536,61 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     return result;
 }
 
-// SweepResult generalized_sweep_from_config(
-//         std::filesystem::path function_file,
-//         std::filesystem::path config_file)
-// {
-//     if (!std::filesystem::exists(function_file)) {
-//         throw std::runtime_error("ERROR: sweep file does not exist");
-//     }
-//     if (!std::filesystem::exists(config_file)) {
-//         throw std::runtime_error("ERROR: options file does not exist");
-//     }
+SweepResult generalized_sweep_from_config(
+        std::filesystem::path function_file,
+        std::filesystem::path config_file,
+        std::string out_dir)
+{
+    if (!std::filesystem::exists(function_file)) {
+        throw std::runtime_error("ERROR: sweep file does not exist: " + function_file.string());
+    }
+    if (!std::filesystem::exists(config_file)) {
+        throw std::runtime_error("ERROR: options file does not exist: " + config_file.string());
+    }
 
-//     sweep::GridSpec grid_spec;
-//     sweep::SweepOptions options;
-//     load_config(config_file, grid_spec, options);
+    sweep::GridSpec grid_spec;
+    sweep::SweepOptions options;
+    load_config(config_file, grid_spec, options);
 
-//     std::shared_ptr<stf::SpaceTimeFunction<3>> func =
-//         stf::parse_space_time_function_from_file<3>(function_file.string());
-//     auto implicit_sweep = [f = std::move(func)](
-//                          Eigen::RowVector4d data) -> std::pair<Scalar, Eigen::RowVector4d> {
-//         auto val = f->value({data[0], data[1], data[2]}, data[3]);
-//         auto grad = f->gradient({data[0], data[1], data[2]}, data[3]);
-//         return {val, {grad[0], grad[1], grad[2], grad[3]}};
-//     };
+    auto funPtr = stf::parse_space_time_function_from_file<3>(function_file.string());
 
-//     std::vector<SpaceTimeFunction> funcs;
-//     funcs.push_back(implicit_sweep);
-//     CSGFunction temp_csg_f; 
+    stf::CSGTree<3>* csgTreePtr = nullptr;
+    auto* managed = dynamic_cast<stf::ManagedSpaceTimeFunction<3>*>(funPtr.get());
+    if (managed) {
+        csgTreePtr = dynamic_cast<stf::CSGTree<3>*>(managed->get_function());
+    }
+    if (!csgTreePtr) {
+        throw std::runtime_error("Expected a CSG tree as input: " + function_file.string());
+    }
 
-//     return generalized_sweep(funcs, temp_csg_f, grid_spec, options);
-// }
+    csgTreePtr->build_flat_plan();
+
+    auto leaf_funcs = csgTreePtr->get_leaf_functions();
+    std::vector<SpaceTimeFunction> funcs;
+    funcs.reserve(leaf_funcs.size());
+    for (auto* func : leaf_funcs) {
+        funcs.push_back([func](Eigen::RowVector4d pt) -> std::pair<double, Eigen::RowVector4d> {
+            std::array<double, 3> pos = {pt[0], pt[1], pt[2]};
+            double t = pt[3];
+            double val = func->value(pos, t);
+            auto grad = func->gradient(pos, t);
+            Eigen::RowVector4d grad_eigen;
+            grad_eigen << grad[0], grad[1], grad[2], grad[3];
+            return {val, grad_eigen};
+        });
+    }
+
+    CSGFunction csg_f = [csgTreePtr](Eigen::RowVectorXd leaf_values) -> std::pair<double, size_t> {
+        int buf_size = csgTreePtr->get_eval_buffer_size();
+        std::vector<double> val_buf(buf_size);
+        std::vector<int> idx_buf(buf_size);
+        int winner = csgTreePtr->winning_leaf_flat(
+            leaf_values.data(), val_buf.data(), idx_buf.data());
+        return {leaf_values[winner], static_cast<size_t>(winner)};
+    };
+
+    options.out_dir = out_dir;
+    return generalized_sweep_csg(funcs, csg_f, csgTreePtr, grid_spec, options);
+}
 
 } // namespace sweep

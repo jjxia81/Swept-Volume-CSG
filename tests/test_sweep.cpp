@@ -1,6 +1,7 @@
 #include <span>
 #include <queue>
 #include <optional>
+#include <filesystem>
 #include <mtet/io.h>
 #include <igl/doublearea.h>
 #include <igl/per_face_normals.h>
@@ -525,19 +526,23 @@ TEST_CASE("envelope_edge_id post-conditions", "[EdgeLabel][examples]")
     };
 
     std::vector<Case> cases = {
-        {"simple",
-         std::string(EXAMPLE_DIR) + "/simple/sweep.yaml",
-         std::string(EXAMPLE_DIR) + "/simple/config.yaml"},
-        {"brush_stroke_blend",
-         std::string(EXAMPLE_DIR) + "/brush_stroke_blend/sweep.yaml",
-         std::string(EXAMPLE_DIR) + "/brush_stroke_blend/config.yaml"},
+        {"twoSphere3d",
+         std::string(DATA_DIR) + "/csg/twoSphere3d.yaml",
+         std::string(DATA_DIR) + "/csg/config_2sphere3d.yaml"},
     };
+
+    // Create a temporary output directory for intermediate files
+    auto tmp_dir = std::filesystem::temp_directory_path() / "sweep_test_output";
+    std::filesystem::create_directories(tmp_dir);
 
     for (const auto& c : cases) {
         SECTION(c.name)
         {
-            auto r = sweep::generalized_sweep_from_config(c.sweep_yaml, c.config_yaml);
+            auto r = sweep::generalized_sweep_from_config(c.sweep_yaml, c.config_yaml, tmp_dir.string());
             check_envelope_edge_id_post_conditions(r);
         }
     }
+
+    // Clean up
+    std::filesystem::remove_all(tmp_dir);
 }

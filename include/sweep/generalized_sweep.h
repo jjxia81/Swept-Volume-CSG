@@ -172,6 +172,7 @@ SweepResult generalized_sweep_csg(
 ///
 SweepResult generalized_sweep_from_config(
         std::filesystem::path function_file,
-        std::filesystem::path config_file);
+        std::filesystem::path config_file,
+        std::string out_dir = ".");
 
 };  // namespace sweep

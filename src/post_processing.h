@@ -795,6 +795,7 @@ lagrange::SurfaceMesh<Scalar, Index> envelope_complex_to_mesh(
 
     return mesh;
 }
+
 template <typename Scalar, typename Index>
 lagrange::SurfaceMesh<Scalar, Index> envelope_complex_to_mesh2(
     const cell_complex::CellComplex<4>& cc,
@@ -1081,8 +1082,27 @@ lagrange::SurfaceMesh<Scalar, Index> compute_envelope_arrangement2(
     }
     (void)num_valid_facets;
 
-    // Compute per-corner time attribute
-    auto interpolate_time = [&](Index fid, Point p) {
+    // // Compute per-corner time attribute
+    // auto interpolate_time = [&](Index fid, Point p) {
+    //     Eigen::Matrix<int, 1, 3> f = F.row(fid);
+    //     Point p0 = V.row(f[0]);
+    //     Point p1 = V.row(f[1]);
+    //     Point p2 = V.row(f[2]);
+    //     auto t0 = T[f[0]];
+    //     auto t1 = T[f[1]];
+    //     auto t2 = T[f[2]];
+
+    //     Scalar b0 = ((p1 - p).cross(p2 - p)).norm();
+    //     Scalar b1 = ((p2 - p).cross(p0 - p)).norm();
+    //     Scalar b2 = ((p0 - p).cross(p1 - p)).norm();
+    //     Scalar denom = b0 + b1 + b2;
+    //     if (std::abs(denom) > std::numeric_limits<Scalar>::epsilon()) {
+    //         return (t0 * b0 + t1 * b1 + t2 * b2) / denom;
+    //     } else {
+    //         return (t0 + t1 + t2) / Scalar(3);
+    //     }
+    // };
+    auto interpolate_time = [&](Index fid, Point p) -> Scalar {
         Eigen::Matrix<int, 1, 3> f = F.row(fid);
         Point p0 = V.row(f[0]);
         Point p1 = V.row(f[1]);
@@ -1091,15 +1111,26 @@ lagrange::SurfaceMesh<Scalar, Index> compute_envelope_arrangement2(
         auto t1 = T[f[1]];
         auto t2 = T[f[2]];
 
-        Scalar b0 = ((p1 - p).cross(p2 - p)).norm();
-        Scalar b1 = ((p2 - p).cross(p0 - p)).norm();
-        Scalar b2 = ((p0 - p).cross(p1 - p)).norm();
-        Scalar denom = b0 + b1 + b2;
-        if (std::abs(denom) > std::numeric_limits<Scalar>::epsilon()) {
-            return (t0 * b0 + t1 * b1 + t2 * b2) / denom;
-        } else {
+        // Solve for barycentrics via 2x2 system:
+        //   p - p0 = u * (p1 - p0) + v * (p2 - p0)
+        Point e1 = p1 - p0;
+        Point e2 = p2 - p0;
+        Point d  = p  - p0;
+
+        Scalar e1e1 = e1.dot(e1);
+        Scalar e2e2 = e2.dot(e2);
+        Scalar e1e2 = e1.dot(e2);
+        Scalar de1  = d.dot(e1);
+        Scalar de2  = d.dot(e2);
+
+        Scalar denom = e1e1 * e2e2 - e1e2 * e1e2;
+        if (std::abs(denom) < std::numeric_limits<Scalar>::epsilon()) {
             return (t0 + t1 + t2) / Scalar(3);
         }
+        Scalar u = (e2e2 * de1 - e1e2 * de2) / denom;
+        Scalar v = (e1e1 * de2 - e1e2 * de1) / denom;
+        Scalar w = Scalar(1) - u - v;
+        return w * t0 + u * t1 + v * t2;
     };
 
     sweep_arrangement.template create_attribute<Scalar>(
@@ -1126,94 +1157,7 @@ lagrange::SurfaceMesh<Scalar, Index> compute_envelope_arrangement2(
         time_values[3 * idx + 2] = t2;
     }
 
-    // // ============================================================
-    // // Recover per-edge `is_junction` on the arrangement
-    // //   For each output edge eid, walk incident output facets, look up
-    // //   their parent input facet, and test whether eid's geometry is
-    // //   collinear with any junction-tagged corner-edge of that parent.
-    // // ============================================================
-    // const bool has_corner_junction = envelope.has_attribute("corner_is_junction");
-    // sweep_arrangement.template create_attribute<int8_t>(
-    //     "is_junction",
-    //     lagrange::AttributeElement::Edge,
-    //     lagrange::AttributeUsage::Scalar,
-    //     1);
-    // auto is_junction = attribute_vector_ref<int8_t>(sweep_arrangement, "is_junction");
-    // is_junction.setZero();
-
-    // if (has_corner_junction) {
-    //     auto in_corner_junction =
-    //         attribute_vector_view<uint8_t>(envelope, "corner_is_junction");
-    //     auto in_V = vertex_view(envelope).template cast<Scalar>();
-
-    //     const Scalar tol = Scalar(1e-9);
-
-    //     // Predicate: is point q on segment [a,b] (collinear, parameter in [0,1])?
-    //     auto on_segment = [&](const Point& a, const Point& b, const Point& q) {
-    //         Point ab = b - a;
-    //         Point aq = q - a;
-    //         Scalar ab_len2 = ab.squaredNorm();
-    //         if (ab_len2 < std::numeric_limits<Scalar>::epsilon() * std::numeric_limits<Scalar>::epsilon()) {
-    //             return aq.squaredNorm() < tol * tol;
-    //         }
-    //         // Distance of q from infinite line through a,b:
-    //         Scalar cross_norm = ab.cross(aq).norm();
-    //         if (cross_norm > tol * std::sqrt(ab_len2)) return false;
-    //         Scalar t = ab.dot(aq) / ab_len2;
-    //         return t >= -tol && t <= Scalar(1) + tol;
-    //     };
-
-    //     const Index num_arr_edges = sweep_arrangement.get_num_edges();
-    //     for (Index eid = 0; eid < num_arr_edges; ++eid) {
-    //         // Endpoint coordinates of this output edge
-    //         auto [v0, v1] = sweep_arrangement.get_edge_vertices(eid);
-    //         Point q0 = out_vertices.row(v0).template cast<Scalar>();
-    //         Point q1 = out_vertices.row(v1).template cast<Scalar>();
-
-    //         bool flagged = false;
-    //         sweep_arrangement.foreach_facet_around_edge(eid, [&](Index fid) {
-    //             if (flagged) return;
-    //             Index parent = parent_facets(fid);
-
-    //             // Walk the parent's 3 corners (input is triangulated)
-    //             const Index pc_begin = envelope.get_facet_corner_begin(parent);
-    //             const Index pc_end = envelope.get_facet_corner_end(parent);
-    //             const Index pn = pc_end - pc_begin;
-    //             for (Index ci = 0; ci < pn; ++ci) {
-    //                 if (in_corner_junction[pc_begin + ci] == 0) continue;
-    //                 Index pv0 = envelope.get_corner_vertex(pc_begin + ci);
-    //                 Index pv1 = envelope.get_corner_vertex(pc_begin + (ci + 1) % pn);
-    //                 Point a = in_V.row(pv0);
-    //                 Point b = in_V.row(pv1);
-    //                 if (on_segment(a, b, q0) && on_segment(a, b, q1)) {
-    //                     flagged = true;
-    //                     break;
-    //                 }
-    //             }
-    //         });
-    //         if (flagged) is_junction[eid] = 1;
-    //     }
-    // }
-
-    // // Extract feature edges (existing logic)
-    // sweep_arrangement.template create_attribute<int8_t>(
-    //     "is_feature",
-    //     lagrange::AttributeElement::Edge,
-    //     lagrange::AttributeUsage::Scalar,
-    //     1);
-    // auto is_feature = attribute_vector_ref<int8_t>(sweep_arrangement, "is_feature");
-    // is_feature.setZero();
-    // Index num_edges = sweep_arrangement.get_num_edges();
-    // for (Index eid = 0; eid < num_edges; eid++) {
-    //     Index edge_valence = sweep_arrangement.count_num_corners_around_edge(eid);
-    //     if (edge_valence != 2) {
-    //         bool feature_edge = false;
-    //         sweep_arrangement.foreach_facet_around_edge(eid, [&](Index fid) {
-    //             if (is_valid[fid] != 0) feature_edge = true;
-    //         });
-    //         if (feature_edge) is_feature[eid] = 1;
-    //     }
-    // }
+   
     // ============================================================
     // Recover per-edge `edge_label` on the arrangement.
     //   For each output edge eid, find any incident output facet's parent
@@ -1469,12 +1413,37 @@ lagrange::SurfaceMesh<Scalar, Index> extract_sweep_surface_from_arrangement2(
         per_label[0], per_label[1], per_label[2], per_label[3], per_label[4]);
 
     // ============================================================
-    // Cleanup. NOTE: this renumbers vertices and removes any vertex with
-    // no incident facet. Edge attributes survive because lagrange
-    // re-indexes them; facet/corner attributes survive too. Per-vertex
-    // attributes (none here) would also survive the renumbering.
-    // ============================================================
+    // Promote per-corner time to per-vertex before cleanup.
+    // Per-corner attributes don't survive remove_isolated_vertices reliably
+    // across all lagrange versions; per-vertex ones do.
+    {
+        sweep_surface.template create_attribute<Scalar>(
+            "time_vertex",
+            lagrange::AttributeElement::Vertex,
+            lagrange::AttributeUsage::Scalar,
+            1);
+        auto time_vertex = attribute_vector_ref<Scalar>(sweep_surface, "time_vertex");
+        std::vector<uint32_t> incident(sweep_surface.get_num_vertices(), 0);
+        auto F_view = facet_view(sweep_surface);
+        auto corner_t = attribute_vector_view<Scalar>(sweep_surface, "time");
+        const Index nf = sweep_surface.get_num_facets();
+        for (Index fid = 0; fid < nf; ++fid) {
+            const Index cb = sweep_surface.get_facet_corner_begin(fid);
+            for (int k = 0; k < 3; ++k) {
+                Index vi = static_cast<Index>(F_view(fid, k));
+                time_vertex[vi] += corner_t[cb + k];
+                incident[vi]++;
+            }
+        }
+        for (Index vi = 0; vi < sweep_surface.get_num_vertices(); ++vi) {
+            if (incident[vi] > 0) {
+                time_vertex[vi] /= static_cast<Scalar>(incident[vi]);
+            }
+        }
+    }
+
     lagrange::remove_isolated_vertices(sweep_surface);
+
     return sweep_surface;
 }
 
@@ -1642,13 +1611,12 @@ void save_sweep_surface_ply(
     const Index num_vertices = static_cast<Index>(V.rows());
     const Index num_facets = static_cast<Index>(F.rows());
 
-    // Compute per-vertex quality = mean of incident face dom_chunk values.
-    // Cast to double for averaging since dom_chunk is a packed uint64.
+    // Per-vertex quality = mean of incident face popcount(face_dom_chunk).
+    // popcount is the natural scalar — averaging raw bitmask values is meaningless.
     std::vector<double> vertex_quality(num_vertices, 0.0);
     std::vector<uint32_t> incident_count(num_vertices, 0);
-
     for (Index fid = 0; fid < num_facets; ++fid) {
-        const double dom_val = static_cast<double>(face_dom[fid]);
+        const double dom_val = static_cast<double>(std::popcount(face_dom[fid]));
         for (Index k = 0; k < 3; ++k) {
             Index vi = static_cast<Index>(F(fid, k));
             vertex_quality[vi] += dom_val;
@@ -1661,11 +1629,9 @@ void save_sweep_surface_ply(
         }
     }
 
-    // Optional: per-vertex time if the attribute survives in the mesh.
-    // const bool has_time = mesh.has_attribute("time") &&
-    //     mesh.get_attribute_base("time").get_element_type() == lagrange::AttributeElement::Vertex;
-    const bool has_time = mesh.has_attribute("time");
-    // Optional per-facet face_label if present.
+    // Per-vertex time lives on `time_vertex` (the per-corner `time` was promoted
+    // to per-vertex inside extract_sweep_surface_from_arrangement2).
+    const bool has_time = mesh.has_attribute("time_vertex");
     const bool has_face_label = mesh.has_attribute("face_label");
 
     std::ofstream out(filename);
@@ -1674,8 +1640,8 @@ void save_sweep_surface_ply(
     // -------- Header --------
     out << "ply\n";
     out << "format ascii 1.0\n";
-    out << "comment sweep surface mesh with per-facet face_dom_chunk and "
-           "per-vertex averaged quality\n";
+    out << "comment sweep surface mesh: face_dom_chunk per facet, "
+           "averaged dom_count quality + time per vertex\n";
     out << "element vertex " << num_vertices << "\n";
     out << "property float x\n";
     out << "property float y\n";
@@ -1689,19 +1655,19 @@ void save_sweep_surface_ply(
     out << "property uint face_dom_chunk\n";
     out << "property float quality\n";
     if (has_face_label) {
-        out << "property uchar face_label\n";
+        out << "property int face_label\n";
     }
     out << "end_header\n";
 
     // -------- Vertices --------
     if (has_time) {
-        auto T = lagrange::attribute_vector_view<Scalar>(mesh, "time");
+        auto T = lagrange::attribute_vector_view<Scalar>(mesh, "time_vertex");
         for (Index vi = 0; vi < num_vertices; ++vi) {
             out << V(vi, 0) << ' '
                 << V(vi, 1) << ' '
                 << V(vi, 2) << ' '
                 << static_cast<float>(vertex_quality[vi]) << ' '
-                << T[vi] << '\n';
+                << static_cast<float>(T[vi]) << '\n';
         }
     } else {
         for (Index vi = 0; vi < num_vertices; ++vi) {
@@ -1713,6 +1679,8 @@ void save_sweep_surface_ply(
     }
 
     // -------- Faces --------
+    // Per-facet "quality" is popcount(face_dom_chunk), so MeshLab's
+    // "Colorize by Face Quality" picks something visually meaningful.
     if (has_face_label) {
         auto face_label = lagrange::attribute_vector_view<uint8_t>(mesh, "face_label");
         for (Index fid = 0; fid < num_facets; ++fid) {
@@ -1721,8 +1689,8 @@ void save_sweep_surface_ply(
                 << F(fid, 1) << ' '
                 << F(fid, 2) << ' '
                 << static_cast<uint32_t>(face_dom[fid]) << ' '
-                << static_cast<float>(face_dom[fid]) << ' '
-                << static_cast<unsigned>(face_label[fid]) << '\n';
+                << static_cast<float>(std::popcount(face_dom[fid])) << ' '
+                << static_cast<int>(face_label[fid]) << '\n';
         }
     } else {
         for (Index fid = 0; fid < num_facets; ++fid) {
@@ -1730,13 +1698,306 @@ void save_sweep_surface_ply(
                 << F(fid, 0) << ' '
                 << F(fid, 1) << ' '
                 << F(fid, 2) << ' '
-                << static_cast<uint32_t>(face_dom[fid]) <<' '
-                << static_cast<float>(face_dom[fid]) <<  '\n';
+                << static_cast<uint32_t>(face_dom[fid]) << ' '
+                << static_cast<float>(std::popcount(face_dom[fid])) << '\n';
         }
     }
+
     out.flush();
     if (!out) throw std::runtime_error("Failed writing " + filename);
 }
 
+
+template <typename Scalar, typename Index>
+void save_sweep_surface_msh(
+    const std::string& filename,
+    const lagrange::SurfaceMesh<Scalar, Index>& mesh,
+    bool binary = true)
+{
+    auto V = lagrange::vertex_view(mesh);
+    auto F = lagrange::facet_view(mesh);
+
+    const Index num_vertices = static_cast<Index>(V.rows());
+    const Index num_facets = static_cast<Index>(F.rows());
+
+    if (num_facets == 0) {
+        throw std::runtime_error("save_sweep_surface_msh: mesh has no facets");
+    }
+
+    // ------------------- Spec scaffolding -------------------
+    mshio::MshSpec spec;
+    spec.mesh_format.version = "4.1";
+    spec.mesh_format.file_type = binary ? 1 : 0;
+    spec.mesh_format.data_size = sizeof(size_t);
+
+    {
+        mshio::SurfaceEntity surface_entity;
+        surface_entity.tag = 1;
+        surface_entity.min_x = -1e10;
+        surface_entity.min_y = -1e10;
+        surface_entity.min_z = -1e10;
+        surface_entity.max_x = 1e10;
+        surface_entity.max_y = 1e10;
+        surface_entity.max_z = 1e10;
+        spec.entities.surfaces.push_back(surface_entity);
+    }
+
+    // ------------------- Nodes -------------------
+    spec.nodes.num_entity_blocks = 1;
+    spec.nodes.num_nodes = num_vertices;
+    spec.nodes.min_node_tag = (num_vertices > 0) ? 1 : 0;
+    spec.nodes.max_node_tag = num_vertices;
+
+    {
+        mshio::NodeBlock nb;
+        nb.entity_dim = 2;
+        nb.entity_tag = 1;
+        nb.parametric = 0;
+        nb.num_nodes_in_block = num_vertices;
+        nb.tags.resize(num_vertices);
+        nb.data.resize(num_vertices * 3);
+        for (Index vi = 0; vi < num_vertices; ++vi) {
+            nb.tags[vi] = vi + 1;  // 1-based MSH tags
+            nb.data[vi * 3 + 0] = V(vi, 0);
+            nb.data[vi * 3 + 1] = V(vi, 1);
+            nb.data[vi * 3 + 2] = V(vi, 2);
+        }
+        spec.nodes.entity_blocks.push_back(std::move(nb));
+    }
+
+    // ------------------- Elements (triangles) -------------------
+    spec.elements.num_entity_blocks = 1;
+    spec.elements.num_elements = num_facets;
+    spec.elements.min_element_tag = 1;
+    spec.elements.max_element_tag = num_facets;
+
+    {
+        mshio::ElementBlock eb;
+        eb.entity_dim = 2;
+        eb.entity_tag = 1;
+        eb.element_type = 2;  // 3-node triangle
+        eb.num_elements_in_block = num_facets;
+        eb.data.resize(num_facets * 4);  // tag + 3 vertex tags per element
+        for (Index fid = 0; fid < num_facets; ++fid) {
+            eb.data[fid * 4 + 0] = fid + 1;
+            eb.data[fid * 4 + 1] = static_cast<size_t>(F(fid, 0)) + 1;
+            eb.data[fid * 4 + 2] = static_cast<size_t>(F(fid, 1)) + 1;
+            eb.data[fid * 4 + 3] = static_cast<size_t>(F(fid, 2)) + 1;
+        }
+        spec.elements.entity_blocks.push_back(std::move(eb));
+    }
+
+    // ------------------- $ElementData helper -------------------
+    auto make_element_data = [&](const std::string& name,
+                                 std::function<double(Index)> value_fn) {
+        mshio::Data d;
+        d.header.string_tags = {name};
+        d.header.real_tags = {};
+        d.header.int_tags = {0, 1, static_cast<int>(num_facets)};
+        d.entries.resize(num_facets);
+        for (Index fid = 0; fid < num_facets; ++fid) {
+            d.entries[fid].tag = fid + 1;
+            d.entries[fid].data = {value_fn(fid)};
+        }
+        return d;
+    };
+
+    // ------------------- face_dom_chunk + popcount -------------------
+    if (mesh.has_attribute("face_dom_chunk")) {
+        auto face_dom = lagrange::attribute_vector_view<uint64_t>(mesh, "face_dom_chunk");
+        spec.element_data.push_back(make_element_data(
+            "face_dom_chunk",
+            [&](Index fid) { return static_cast<double>(face_dom[fid]); }));
+        spec.element_data.push_back(make_element_data(
+            "face_dom_count",
+            [&](Index fid) {
+                return static_cast<double>(std::popcount(face_dom[fid]));
+            }));
+    }
+
+    // ------------------- face_label -------------------
+    if (mesh.has_attribute("face_label")) {
+        auto face_label = lagrange::attribute_vector_view<uint8_t>(mesh, "face_label");
+        spec.element_data.push_back(make_element_data(
+            "face_label",
+            [&](Index fid) { return static_cast<double>(face_label[fid]); }));
+    }
+
+    // ------------------- envelope_facet_id (debug aid) -------------------
+    if (mesh.has_attribute("envelope_facet_id")) {
+        auto env_fid = lagrange::attribute_vector_view<Index>(mesh, "envelope_facet_id");
+        spec.element_data.push_back(make_element_data(
+            "envelope_facet_id",
+            [&](Index fid) { return static_cast<double>(env_fid[fid]); }));
+    }
+
+    // ------------------- $NodeData helper -------------------
+    auto make_node_data = [&](const std::string& name,
+                              std::function<double(Index)> value_fn) {
+        mshio::Data d;
+        d.header.string_tags = {name};
+        d.header.real_tags = {};
+        d.header.int_tags = {0, 1, static_cast<int>(num_vertices)};
+        d.entries.resize(num_vertices);
+        for (Index vi = 0; vi < num_vertices; ++vi) {
+            d.entries[vi].tag = vi + 1;
+            d.entries[vi].data = {value_fn(vi)};
+        }
+        return d;
+    };
+
+    // ------------------- Per-vertex averaged dom_count -------------------
+    if (mesh.has_attribute("face_dom_chunk")) {
+        auto face_dom = lagrange::attribute_vector_view<uint64_t>(mesh, "face_dom_chunk");
+        std::vector<double> vertex_quality(num_vertices, 0.0);
+        std::vector<uint32_t> incident_count(num_vertices, 0);
+        for (Index fid = 0; fid < num_facets; ++fid) {
+            double dom_val = static_cast<double>(std::popcount(face_dom[fid]));
+            for (Index k = 0; k < 3; ++k) {
+                Index vi = static_cast<Index>(F(fid, k));
+                vertex_quality[vi] += dom_val;
+                incident_count[vi]++;
+            }
+        }
+        for (Index vi = 0; vi < num_vertices; ++vi) {
+            if (incident_count[vi] > 0) {
+                vertex_quality[vi] /= static_cast<double>(incident_count[vi]);
+            }
+        }
+        spec.node_data.push_back(make_node_data(
+            "vertex_dom_count",
+            [&](Index vi) { return vertex_quality[vi]; }));
+    }
+
+    // ------------------- Per-vertex time -------------------
+    // `time_vertex` is per-vertex (created in extract_sweep_surface_from_arrangement2);
+    // the per-corner `time` attribute would not be safe to index by vertex id.
+    if (mesh.has_attribute("time_vertex")) {
+        auto T = lagrange::attribute_vector_view<Scalar>(mesh, "time_vertex");
+        spec.node_data.push_back(make_node_data(
+            "time",
+            [&](Index vi) { return static_cast<double>(T[vi]); }));
+    }
+
+    // ------------------- Write -------------------
+    mshio::save_msh(filename, spec);
+}
+
+
+template <typename Scalar, typename Index>
+void debug_dump_mesh_with_time_ply(
+    const std::string& filename,
+    const lagrange::SurfaceMesh<Scalar, Index>& mesh,
+    const std::string& time_attr_name = "time")
+{
+    auto V = lagrange::vertex_view(mesh);
+    auto F = lagrange::facet_view(mesh);
+    const Index num_vertices = static_cast<Index>(V.rows());
+    const Index num_facets = static_cast<Index>(F.rows());
+
+    if (!mesh.has_attribute(time_attr_name)) {
+        throw std::runtime_error(
+            "debug_dump_mesh_with_time_ply: mesh has no '" + time_attr_name + "' attribute");
+    }
+
+    // Resolve time to per-vertex values regardless of where it lives.
+    // - per-vertex: read directly
+    // - per-corner: average incident corners per vertex
+    // - per-facet:  copy facet value to its 3 vertices, average over incident facets
+    std::vector<double> vert_time(num_vertices, 0.0);
+    std::vector<uint32_t> incident(num_vertices, 0);
+
+    // Try per-vertex first.
+    bool resolved = false;
+    try {
+        auto T = lagrange::attribute_vector_view<Scalar>(mesh, time_attr_name);
+        if (static_cast<Index>(T.size()) == num_vertices) {
+            for (Index vi = 0; vi < num_vertices; ++vi) {
+                vert_time[vi] = static_cast<double>(T[vi]);
+                incident[vi] = 1;
+            }
+            resolved = true;
+        }
+    } catch (...) {
+        // fall through
+    }
+
+    if (!resolved) {
+        // Try per-corner.
+        try {
+            auto T = lagrange::attribute_vector_view<Scalar>(mesh, time_attr_name);
+            if (static_cast<Index>(T.size()) == num_facets * 3) {
+                for (Index fid = 0; fid < num_facets; ++fid) {
+                    const Index cb = mesh.get_facet_corner_begin(fid);
+                    for (int k = 0; k < 3; ++k) {
+                        Index vi = static_cast<Index>(F(fid, k));
+                        vert_time[vi] += static_cast<double>(T[cb + k]);
+                        incident[vi]++;
+                    }
+                }
+                resolved = true;
+            }
+        } catch (...) {
+        }
+    }
+
+    if (!resolved) {
+        // Per-facet fallback.
+        auto T = lagrange::attribute_vector_view<Scalar>(mesh, time_attr_name);
+        for (Index fid = 0; fid < num_facets; ++fid) {
+            for (int k = 0; k < 3; ++k) {
+                Index vi = static_cast<Index>(F(fid, k));
+                vert_time[vi] += static_cast<double>(T[fid]);
+                incident[vi]++;
+            }
+        }
+    }
+
+    for (Index vi = 0; vi < num_vertices; ++vi) {
+        if (incident[vi] > 0) vert_time[vi] /= static_cast<double>(incident[vi]);
+    }
+
+    // Diagnostic: log min/max
+    double tmin = std::numeric_limits<double>::infinity();
+    double tmax = -std::numeric_limits<double>::infinity();
+    Index zero_incident = 0;
+    for (Index vi = 0; vi < num_vertices; ++vi) {
+        if (incident[vi] == 0) {
+            ++zero_incident;
+            continue;
+        }
+        tmin = std::min(tmin, vert_time[vi]);
+        tmax = std::max(tmax, vert_time[vi]);
+    }
+    sweep::logger().info(
+        "[debug_dump] {} :: V={} F={} time range [{}, {}] (orphan vertices: {})",
+        filename, num_vertices, num_facets, tmin, tmax, zero_incident);
+
+    // Write PLY: vertex {x,y,z, quality(=time)}, face {3 v0 v1 v2}.
+    std::ofstream out(filename);
+    if (!out) throw std::runtime_error("Cannot open " + filename + " for writing");
+
+    out << "ply\n";
+    out << "format ascii 1.0\n";
+    out << "comment debug dump: time as per-vertex quality\n";
+    out << "element vertex " << num_vertices << "\n";
+    out << "property float x\n";
+    out << "property float y\n";
+    out << "property float z\n";
+    out << "property float quality\n";
+    out << "element face " << num_facets << "\n";
+    out << "property list uchar int vertex_indices\n";
+    out << "end_header\n";
+
+    for (Index vi = 0; vi < num_vertices; ++vi) {
+        out << V(vi, 0) << ' ' << V(vi, 1) << ' ' << V(vi, 2) << ' '
+            << static_cast<float>(vert_time[vi]) << '\n';
+    }
+    for (Index fid = 0; fid < num_facets; ++fid) {
+        out << "3 " << F(fid, 0) << ' ' << F(fid, 1) << ' ' << F(fid, 2) << '\n';
+    }
+    out.flush();
+    if (!out) throw std::runtime_error("Failed writing " + filename);
+}
 
 #endif /* post_processing_h */

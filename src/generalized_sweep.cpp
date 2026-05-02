@@ -485,6 +485,8 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
         return values[index];
     };
 
+    auto sf_start = std::chrono::high_resolution_clock::now();
+
     std::vector<double> timeSamples; 
     std::vector<size_t> timeStartIndices;
     timeStartIndices.push_back(0);
@@ -498,6 +500,8 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
         timeEndIndex += time[i].size();
         timeStartIndices.push_back(timeEndIndex);
     }
+
+
 
     auto cellFromGrid = cell_complex::from_simplicial_columns<4>(verts, simps, timeSamples, timeStartIndices);
     logger().info("Successfully generated column grid");
@@ -528,15 +532,21 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     size_t root_start = csgTreePtr->get_root_index() * num_leafs;
 
     cell_complex::algorithm::compute_envelope_complex(ccSelect, *csgTreePtr);
-
-    cell_complex::save_obj(options.out_dir + "/envelope.obj", ccSelect);
-    cell_complex::save_msh(options.out_dir + "/envelope.msh", ccSelect);
+    
+    auto sf_end = std::chrono::high_resolution_clock::now();
+    logger().info(
+                "cell complex surfacing time: {} seconds",
+                std::chrono::duration<double>(sf_end - sf_start).count());
     
     
-
+    auto feature_start = std::chrono::high_resolution_clock::now();
     // Convert envelope cell complex -> lagrange mesh with "time" attribute
     // Triangulate polygonal 2-cells in place
     cell_complex::triangulate_all_2cells(ccSelect);
+
+    cell_complex::save_obj(options.out_dir + "/envelope.obj", ccSelect);
+    cell_complex::save_msh(options.out_dir + "/envelope.msh", ccSelect);
+
     // auto envelope_mesh = envelope_complex_to_mesh<Scalar, uint32_t>(ccSelect);
     // auto envelope_mesh = envelope_complex_to_mesh<Scalar, uint32_t>
     //         (ccSelect, root_start, num_leafs, junction_raw_ids);
@@ -544,7 +554,10 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     std::vector<EdgeKey> junction_edges;
     std::vector<int> edges_labels;
     extraceFeatureLinesFromCC(ccSelect, root_start, num_leafs, junction_edges, edges_labels);
-    
+    auto feature_end = std::chrono::high_resolution_clock::now();
+    logger().info(
+                "feature lines generation from cc envelop time: {} seconds",
+                std::chrono::duration<double>(feature_end - feature_start).count());
     cell_complex::save_edges_to_ply<4>(
     options.out_dir + "/feature_edges_from_ccEnvelop.ply",
     junction_edges,
@@ -566,6 +579,7 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     // for (const auto& ek : junction_edges) {
     //     junction_raw_ids.insert(cell_complex::get_index<1, 4>(ek));
     // }
+    auto ma_start = std::chrono::high_resolution_clock::now();
     ankerl::unordered_dense::map<size_t, int> junction_label_map;
     junction_label_map.reserve(junction_edges.size());
     for (size_t i = 0; i < junction_edges.size(); ++i) {
@@ -576,14 +590,35 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     
     auto envelope_mesh = envelope_complex_to_mesh2<Scalar, uint32_t>
             (ccSelect, root_start, num_leafs, junction_label_map);
+
+    // debug_dump_mesh_with_time_ply<Scalar, uint32_t>(
+    // options.out_dir + "/debug_01_envelope_mesh.ply", envelope_mesh);
+
     // Compute arrangement (self-intersection resolution + cell labeling)
     result.arrangement = compute_envelope_arrangement2<Scalar, uint32_t>(
         envelope_mesh,
         options.volume_threshold,
         options.face_count_threshold);
+
+    // debug_dump_mesh_with_time_ply<Scalar, uint32_t>(
+    // options.out_dir + "/debug_02_arrangement.ply", result.arrangement);
+
+    auto ma_end = std::chrono::high_resolution_clock::now();
+    logger().info(
+                "Mesh arrangement time: {} seconds",
+                std::chrono::duration<double>(ma_end - ma_start).count());
     // Extract the valid (winding-number boundary) facets as the sweep surface
     result.sweep_surface = extract_sweep_surface_from_arrangement2<Scalar, uint32_t>(
         result.arrangement);
+
+    // debug_dump_mesh_with_time_ply<Scalar, uint32_t>(
+    // options.out_dir + "/debug_03_sweep_surface.ply", result.sweep_surface);
+
+    auto sweep_surf_end = std::chrono::high_resolution_clock::now();
+    logger().info(
+                "Sweep surface extraction time: {} seconds",
+                std::chrono::duration<double>(sweep_surf_end - ma_end).count());
+    // logger().info("Extract surface time: {} seconds", (sweep_surf_end - ma_end) * 1e-6);
 
     // After result.sweep_surface is finalized:
     // save_feature_edges_obj(options.out_dir + "/sweep_features_lines.obj", result.sweep_surface);
@@ -601,6 +636,9 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     save_sweep_surface_ply<Scalar, uint32_t>(
     options.out_dir + "/sweep_surface_labeled.ply",
     result.sweep_surface);
+
+    save_sweep_surface_msh<Scalar, uint32_t>(options.out_dir + "/sweep_surface_labeled.msh", result.sweep_surface);
+
     
     return result;
 }

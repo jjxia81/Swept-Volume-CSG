@@ -85,7 +85,9 @@ bool gridRefineCSGParallel(
     size_t initial_time_samples,
     const double min_tet_radius_ratio,
     const double min_tet_edge_length,
-    const std::string& out_dir);
+    const std::string& out_dir,
+    double set_time_start,
+    double set_time_end );
 
 // bool gridRefineCSG(
 //     mtet::MTetMesh& grid,

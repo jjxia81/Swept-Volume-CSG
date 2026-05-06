@@ -28,6 +28,8 @@
 
 namespace sweep {
 
+Scalar SweepOptions::time_start = 0.0;
+Scalar SweepOptions::time_end = 1.0;
 
 size_t calRefinedGridSampleNumber(vertExtrude& vertexMap)
 {
@@ -140,7 +142,9 @@ refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs,
             options.initial_time_samples,
             options.min_tet_radius_ratio,
             options.min_tet_edge_length,
-            options.out_dir)) {
+            options.out_dir,
+            options.time_start,
+            options.time_end)) {
         throw std::runtime_error("ERROR: grid generation failed");
     };
 
@@ -166,11 +170,11 @@ refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs,
 
     convert_4d_grid_mtetcol(grid, vertexMap, tetActiveMap, verts, simps, tetActiveTags, time, values, options.out_dir, cyclic);
 
-    std::string outgrid_json_path = options.out_dir +  "/output_grid.json"; 
-    writeGridToJson(outgrid_json_path, verts, simps, tetActiveTags, time);
+    // std::string outgrid_json_path = options.out_dir +  "/output_grid.json"; 
+    // writeGridToJson(outgrid_json_path, verts, simps, tetActiveTags, time);
 
-    std::string outpath = options.out_dir +  "/output_grid.m"; 
-    export_to_mathematica(outpath, verts, simps, tetActiveTags, time); 
+    // std::string outpath = options.out_dir +  "/output_grid.m"; 
+    // export_to_mathematica(outpath, verts, simps, tetActiveTags, time); 
     
 
     // cell_complex::from_simplicial_columns<4>(verts, simps, timeSamples, timeStartIndices);
@@ -477,13 +481,14 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
         //     "Grid evaluation time: {} seconds",
         //     std::chrono::duration<double>(evaluate_end - evaluate_start).count());
     }
+    values.clear(); // not used 
 
-    std::function<std::span<double>(size_t)> time_func = [&](size_t index) -> std::span<double> {
-        return time[index];
-    };
-    std::function<std::span<double>(size_t)> values_func = [&](size_t index) -> std::span<double> {
-        return values[index];
-    };
+    // std::function<std::span<double>(size_t)> time_func = [&](size_t index) -> std::span<double> {
+    //     return time[index];
+    // };
+    // std::function<std::span<double>(size_t)> values_func = [&](size_t index) -> std::span<double> {
+    //     return values[index];
+    // };
 
     auto sf_start = std::chrono::high_resolution_clock::now();
 
@@ -491,6 +496,7 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     std::vector<size_t> timeStartIndices;
     timeStartIndices.push_back(0);
     size_t timeEndIndex = 0;
+   
     for(size_t i = 0; i < time.size(); ++i)
     {
         for(auto tVal : time[i])
@@ -501,11 +507,10 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
         timeStartIndices.push_back(timeEndIndex);
     }
 
-
-
     auto cellFromGrid = cell_complex::from_simplicial_columns<4>(verts, simps, timeSamples, timeStartIndices);
     logger().info("Successfully generated column grid");
-
+    verts.clear(); simps.clear();timeSamples.clear();
+    timeStartIndices.clear(); time.clear();
     auto saving_start = std::chrono::time_point_cast<std::chrono::microseconds>(
                             std::chrono::high_resolution_clock::now())
                             .time_since_epoch()
@@ -544,8 +549,8 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     // Triangulate polygonal 2-cells in place
     cell_complex::triangulate_all_2cells(ccSelect);
 
-    cell_complex::save_obj(options.out_dir + "/envelope.obj", ccSelect);
-    cell_complex::save_msh(options.out_dir + "/envelope.msh", ccSelect);
+    // cell_complex::save_obj(options.out_dir + "/envelope.obj", ccSelect);
+    // cell_complex::save_msh(options.out_dir + "/envelope.msh", ccSelect);
 
     // auto envelope_mesh = envelope_complex_to_mesh<Scalar, uint32_t>(ccSelect);
     // auto envelope_mesh = envelope_complex_to_mesh<Scalar, uint32_t>
@@ -591,6 +596,9 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     auto envelope_mesh = envelope_complex_to_mesh2<Scalar, uint32_t>
             (ccSelect, root_start, num_leafs, junction_label_map);
 
+    save_sweep_surface_ply<Scalar, uint32_t>(
+    options.out_dir + "/envelop_surface_labeled.ply",
+    envelope_mesh);
     // debug_dump_mesh_with_time_ply<Scalar, uint32_t>(
     // options.out_dir + "/debug_01_envelope_mesh.ply", envelope_mesh);
 
@@ -599,6 +607,10 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
         envelope_mesh,
         options.volume_threshold,
         options.face_count_threshold);
+    
+    // envelope_mesh.clear_facets();
+    // envelope_mesh.clear_edges();
+    // envelope_mesh.clear_vertices();
 
     // debug_dump_mesh_with_time_ply<Scalar, uint32_t>(
     // options.out_dir + "/debug_02_arrangement.ply", result.arrangement);
@@ -633,12 +645,16 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     options.out_dir + "/sweep_feature_edges_labeled.ply",
     result.sweep_surface);
 
+    save_labeled_edges_msh<Scalar, uint32_t>(
+    options.out_dir + "/sweep_feature_edges_labeled.msh",
+    result.sweep_surface);
+
     save_sweep_surface_ply<Scalar, uint32_t>(
     options.out_dir + "/sweep_surface_labeled.ply",
     result.sweep_surface);
 
     save_sweep_surface_msh<Scalar, uint32_t>(options.out_dir + "/sweep_surface_labeled.msh", result.sweep_surface);
-
+        
     
     return result;
 }
@@ -686,7 +702,7 @@ SweepResult generalized_sweep_from_config(
             return {val, grad_eigen};
         });
     }
-
+    
     CSGFunction csg_f = [csgTreePtr](Eigen::RowVectorXd leaf_values) -> std::pair<double, size_t> {
         int buf_size = csgTreePtr->get_eval_buffer_size();
         std::vector<double> val_buf(buf_size);

@@ -141,6 +141,9 @@ struct SweepOptions {
     // Scalar min_tet_edge_length = 8e-2;
     Scalar min_tet_edge_length = 0.04;
 
+    static Scalar time_start;
+    static Scalar time_end;
+
     std::string out_dir = "." ;
 };
 

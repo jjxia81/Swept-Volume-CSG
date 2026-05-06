@@ -90,9 +90,19 @@ bool refineEqualSurfaceCSG(
     const std::pair<size_t, size_t>& equalSurfFuncIds,
     bool& choice,
     bool& eqaulSurf0X,
+    double& max_error,
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount);
 
+
+bool refineTripleSurfaceCSG(
+    const std::array<vertex4d*, 5>& verts,
+    const Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierVals,
+    const Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierFtV,
+    const double threshold,
+    const std::array<size_t, 3>& tripleFuncIds,
+    std::array<double, timer_amount>& profileTimer,
+    std::array<size_t, timer_amount>& profileCount);
 
 /// Refine critiera that only invokes the bezier computation. This is the samllest testing unit for comparing the run speed across different methods of constructing bezier simplex.
 bool refineFtBezier(

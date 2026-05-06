@@ -320,6 +320,7 @@ bool refineFtCSG(
         }
         func0XIds[dFid] = refRes[i].fZeroX;
     }
+
     if(needRefine)
     {
         Eigen::Index maxIndex = 0;
@@ -337,6 +338,7 @@ bool refineEqualSurfaceCSG(
     const std::pair<size_t, size_t>& equalSurfFuncIds,
     bool& choice,
     bool& eqaulSurf0X,
+    double& max_error,
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount)
 {
@@ -387,15 +389,131 @@ bool refineEqualSurfaceCSG(
     if (error.maxCoeff() > threshold * gradList.norm()) {
         Eigen::RowVector<double, 16> topFError = error(topFIndices);
         Eigen::RowVector<double, 16> botFError = error(botFIndices);
-        choice = std::max(error[3], error[16]) >
+        auto cur_choice = std::max(error[3], error[16]) >
                     std::min(topFError.maxCoeff(), botFError.maxCoeff());
         // refineRes.error = error.maxCoeff(); 
+        if(max_error <error.maxCoeff())
+        {
+            max_error = max_error > error.maxCoeff();
+            choice = cur_choice;
+        }
         return true;
     } 
     return false;
 }
 
-Eigen::RowVector<double, 20> bezierVals3DShared;
+
+bool refineTripleSurfaceCSG(
+    const std::array<vertex4d*, 5>& verts,
+    const Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierVals,
+    const Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, 35, Eigen::RowMajor>> bezierFtV,
+    const double threshold,
+    const std::array<size_t, 3>& tripleFuncIds,
+    std::array<double, timer_amount>& profileTimer,
+    std::array<size_t, timer_amount>& profileCount)
+{
+    const auto& p1 = verts[0]->coord;
+    const auto& p2 = verts[1]->coord;
+    const auto& p3 = verts[2]->coord;
+    const auto& p4 = verts[3]->coord;
+    const auto& p5 = verts[4]->coord;
+
+    Eigen::MatrixXd JacobianMat(3, 4); 
+
+    for(int i = 0; i < 3; ++i)
+    {   
+        Eigen::RowVector4d grad1 = verts[0]->grads.row(tripleFuncIds[i]);
+        Eigen::RowVector4d grad2 = verts[1]->grads.row(tripleFuncIds[i]);
+        Eigen::RowVector4d grad3 = verts[2]->grads.row(tripleFuncIds[i]);
+        Eigen::RowVector4d grad4 = verts[3]->grads.row(tripleFuncIds[i]);
+        Eigen::RowVector4d grad5 = verts[4]->grads.row(tripleFuncIds[i]);
+        JacobianMat.row(i) = (grad1 + grad2 + grad3 + grad4 + grad5) / 5.0;
+    }
+    
+
+    const auto& bezier_f1 = bezierVals.row(tripleFuncIds[0]);
+    const auto& bezier_f2 = bezierVals.row(tripleFuncIds[1]);
+    const auto& bezier_f3 = bezierVals.row(tripleFuncIds[2]);
+   
+    auto vec1 = p2 - p1, vec2 = p3 - p1, vec3 = p4 - p1, vec4 = p5 - p1;
+    Eigen::Matrix4d vec;
+    vec << vec1, vec2, vec3, vec4;
+    Eigen::Matrix4d adj;
+    adjugate(vec, adj);
+
+    auto v1 = bezier_f1[0];
+    auto v2 = bezier_f1[1];
+    auto v3 = bezier_f1[2];
+    auto v4 = bezier_f1[3];
+    auto v5 = bezier_f1[4];
+    Eigen::RowVector4d gradList1 = Eigen::RowVector4d(v2 - v1, v3 - v1, v4 - v1, v5 - v1) * adj;
+
+    v1 = bezier_f2[0];
+    v2 = bezier_f2[1];
+    v3 = bezier_f2[2];
+    v4 = bezier_f2[3];
+    v5 = bezier_f2[4];
+    Eigen::RowVector4d gradList2 = Eigen::RowVector4d(v2 - v1, v3 - v1, v4 - v1, v5 - v1) * adj;
+
+    v1 = bezier_f3[0];
+    v2 = bezier_f3[1];
+    v3 = bezier_f3[2];
+    v4 = bezier_f3[3];
+    v5 = bezier_f3[4];
+    Eigen::RowVector4d gradList3 = Eigen::RowVector4d(v2 - v1, v3 - v1, v4 - v1, v5 - v1) * adj;
+
+    // Eigen::MatrixXd JacobianMat(3, 4); 
+    // JacobianMat << gradList1, gradList2, gradList3;
+
+    auto projecMat = JacobianMat.transpose() * (JacobianMat * JacobianMat.transpose()).inverse();
+
+
+    Eigen::RowVector<double, 30> error1 =
+        ((bezier_f1.tail(30) - (bezier_f1.head(5) * Bezier4D_ls.bottomRows(30).transpose()) / 3)
+        *vec.determinant() / gradList1.norm())
+            .array()
+            .abs();
+
+    Eigen::RowVector<double, 30> error2 =
+        ((bezier_f2.tail(30) - (bezier_f2.head(5) * Bezier4D_ls.bottomRows(30).transpose()) / 3)
+        *vec.determinant() / gradList2.norm())
+            .array()
+            .abs();
+
+    Eigen::RowVector<double, 30> error3 =
+        ((bezier_f3.tail(30) - (bezier_f3.head(5) * Bezier4D_ls.bottomRows(30).transpose()) / 3)
+        *vec.determinant() / gradList3.norm() )
+            .array()
+            .abs();
+
+    // auto bezier_f_all = bezier_f1 + bezier_f2 + bezier_f3;
+    // Eigen::RowVector<double, 30> error_combine =
+    //     ((bezier_f3.tail(30) - (bezier_f3.head(5) * Bezier4D_ls.bottomRows(30).transpose()) / 3)*vec.determinant())
+    //         .array()
+    //         .abs();
+
+    // Eigen::MatrixXd errorMat(3, 30); 
+    // errorMat << error1, error2, error3; 
+    // auto distsMat = projecMat * errorMat;
+    // Eigen::VectorXd error = distsMat.colwise().norm();
+
+    auto error = error1 + error2 + error3;
+    if (error.maxCoeff() > threshold ) {
+        // Eigen::RowVector<double, 16> topFError = error(topFIndices);
+        // Eigen::RowVector<double, 16> botFError = error(botFIndices);
+        // auto cur_choice = std::max(error[3], error[16]) >
+        //             std::min(topFError.maxCoeff(), botFError.maxCoeff());
+        // refineRes.error = error.maxCoeff(); 
+        // if(max_error <error.maxCoeff())
+        // {
+        //     max_error = max_error > error.maxCoeff();
+        //     choice = cur_choice;
+        // }
+        return true;
+    } 
+    return false;
+}
+
 /// See header
 bool refine3D(const std::array<vertex4d, 4>& verts, const double threshold)
 {
@@ -414,6 +532,7 @@ bool refine3D(const std::array<vertex4d, 4>& verts, const double threshold)
     const auto& g3 = verts[2].valGradList.second;
     const auto& g4 = verts[3].valGradList.second;
 
+    Eigen::RowVector<double, 20> bezierVals3DShared;
     // Eigen::RowVector<double, 20> bezierVals;
     bezierVals3DShared.setZero();
     if (!bezier3D(p1, p2, p3, p4, v1, v2, v3, v4, g1, g2, g3, g4, bezierVals3DShared)) {
@@ -494,7 +613,7 @@ bool needsRefinementForFunction(
     const Eigen::RowVectorXd& g4,
     double threshold)
 {
-    // Eigen::RowVector<double, 20> bezierVals3DShared;
+    Eigen::RowVector<double, 20> bezierVals3DShared;
     if (!bezier3D(p1, p2, p3, p4, v1, v2, v3, v4, g1, g2, g3, g4, bezierVals3DShared))
         return false;
 

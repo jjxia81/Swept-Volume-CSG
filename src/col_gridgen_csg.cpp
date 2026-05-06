@@ -10,7 +10,6 @@
 #include <unordered_set>
 #include "bezier_simplex.h"
 #include <omp.h>
-
 #define parallel_bezier 0
 
 // ============================================================
@@ -31,6 +30,8 @@ std::unordered_map<uint64_t, int>* colActiveMapPtr = nullptr;
 bool isTemporalRefine = false;
 uint64_t tempRefineVtId = 0; 
 int  tempRefineTimeVal = 0;
+double time_start_G = 0;
+double time_end_G = 1.0;
 
 bool refine_using_openmp = false; 
 
@@ -72,6 +73,7 @@ void init5CGridCSG(
             vertex4d vert(csgf_n);
             vert.time = time3DList[i];
             double time_fp = (double)vert.time / MAX_TIME;
+            // double time_fp = (double)vert.time / MAX_TIME * (time_end_G - time_start_G) + time_start_G;
             vert.coord = {data[0], data[1], data[2], time_fp};
             for(int fi = 0; fi < csgf_n; ++fi)
             {
@@ -372,6 +374,7 @@ static vertexCol make_new_spatial_vert(
         vertex4d vert(funcs.size());
         vert.time        = tSamples[i];
         const double tfp = (double)vert.time / MAX_TIME;
+        // double tfp = (double)vert.time / MAX_TIME * (time_end_G - time_start_G) + time_start_G;
         vert.coord       = {vidCoord[0], vidCoord[1], vidCoord[2], tfp};
         for(size_t dfi = 0; dfi < funcs.size(); ++dfi )
         {
@@ -545,6 +548,7 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
         bool choice = false, zeroX = false;
         bool inside = false;
         bool needs_refine = false;
+        double max_ef_error = 0;
         needs_refine  =
             refineFtCSG(sc.tet4DVertsPtr, bezierValsShared, bezierFtValsShared, domFIds, traj_threshold, choice, inside, zeroX,
                      profileTimer, profileCount, sc.cellDFuncFt0XIds.row(ci), sc.cellDFunc0XIds.row(ci));
@@ -556,10 +560,12 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
                 return;
             }
         }
+        
         // std::cout << " successful refineFtCSG " << std::endl;
         if(zeroX) activeCol = true;
         bool eqaulSurf0X = false;
         bool refineB3 = true;
+        std::unordered_set<size_t> domEqualFuncIds;
         if(!needs_refine && refineB3)
         {
             for (size_t id_a = 0; id_a < CSGFuncNum; ++id_a)
@@ -569,18 +575,40 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
                 {
                     if(sc.cellDFunc0XIds.row(ci)(id_b) == 0) continue;
                     needs_refine = refineEqualSurfaceCSG(sc.tet4DVertsPtr, bezierValsShared,bezierFtValsShared,
-                    traj_threshold, {id_a, id_b}, choice, eqaulSurf0X,profileTimer,profileCount);
+                    traj_threshold, {id_a, id_b}, choice, eqaulSurf0X,max_ef_error, profileTimer,profileCount);
                     if(eqaulSurf0X) 
                     {
                         activeCol = true;
                         // equalSurfaceFuncPairs[ci](id_a, id_b) = 1;
                         pairToTets[{id_a, id_b}].push_back(ci);
+                        domEqualFuncIds.insert(id_a);
+                        domEqualFuncIds.insert(id_b);
                     }
-                    // if(needs_refine) break;
+                    if(needs_refine) break;
                 }
-                // if(needs_refine) break;
+                if(needs_refine) break;
             }
         }
+
+        // if(!needs_refine && domEqualFuncIds.size() >= 3)
+        // {
+        //     std::vector<size_t> ids(domEqualFuncIds.begin(), domEqualFuncIds.end());
+        //     const size_t n_f = ids.size();
+        //     for (size_t i = 0; i < n_f; ++i) {
+        //         for (size_t j = i + 1; j < n_f; ++j) {
+        //             for (size_t k = j + 1; k < n_f; ++k) {
+        //                 std::array<size_t, 3> tripleFuncIds{ids[i], ids[j], ids[k]};
+        //                 needs_refine = refineTripleSurfaceCSG(
+        //                     sc.tet4DVertsPtr, bezierValsShared,bezierFtValsShared,
+        //                     traj_threshold,tripleFuncIds,profileTimer, profileCount);
+        //                 if(needs_refine) break;
+        //             }
+        //             if(needs_refine) break;
+        //         }
+        //         if(needs_refine) break;
+        //     }
+        // }
+
         if (needs_refine) {
             sc.subList[ci]     = true;
             sc.timeLenList[ci] = sc.tet4DVertsPtr[0]->time - sc.tet4DVertsPtr[4]->time;
@@ -588,8 +616,13 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
             sc.indList[ci]     = cell5Col[ci].hash[4];
             sc.choiceList[ci]  = choice;
 
+            sc.choiceList[ci]  = sc.timeLenList[ci] /double(MAX_TIME) * time_scale 
+                                > sc.longest_edge_length;
+            
         } else {
             sc.subList[ci] = false;
+            
+
         }
     }
   
@@ -604,27 +637,27 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
         if (sc.choiceList[ci]) {
             if (sc.timeLenList[ci] > MIN_TIME) {
                 
-                double dt_sum = 0; double dx_sum = 0; double dy_sum = 0; double dz_sum = 0; 
-                for(size_t fi = 0; fi < sc.cellDFunc0XIds.cols(); ++ fi)
-                {
-                    if(sc.cellDFunc0XIds(ci,fi) != 0)
-                    {
-                        bind_cell5_verts(cell5Col[ci], sc.baseVertsPtr, sc.tet4DVertsPtr);
-                        const auto& g1s = sc.tet4DVertsPtr[0]->grads;
-                        const auto& g2s = sc.tet4DVertsPtr[1]->grads;
-                        const auto& g3s = sc.tet4DVertsPtr[2]->grads;
-                        const auto& g4s = sc.tet4DVertsPtr[3]->grads;
-                        const auto& g5s = sc.tet4DVertsPtr[4]->grads;
-                        dt_sum += abs(g1s(fi,3)) + abs(g2s(fi,3)) + abs(g3s(fi,3)) + abs(g4s(fi,3)) + abs(g5s(fi,3));
-                        dx_sum += abs(g1s(fi,0)) + abs(g2s(fi,0)) + abs(g3s(fi,0)) + abs(g4s(fi,0)) + abs(g5s(fi,0));
-                        dy_sum += abs(g1s(fi,1)) + abs(g2s(fi,1)) + abs(g3s(fi,1)) + abs(g4s(fi,1)) + abs(g5s(fi,1));
-                        dz_sum += abs(g1s(fi,2)) + abs(g2s(fi,2)) + abs(g3s(fi,2)) + abs(g4s(fi,2)) + abs(g5s(fi,2));
-                    }
-                }
-                double local_time_scale = std::max(1.0, (dt_sum + 0.000001)/( (dx_sum + dy_sum + dz_sum)/ 3 + 0.000001));
+                // double dt_sum = 0; double dx_sum = 0; double dy_sum = 0; double dz_sum = 0; 
+                // for(size_t fi = 0; fi < sc.cellDFunc0XIds.cols(); ++ fi)
+                // {
+                //     if(sc.cellDFunc0XIds(ci,fi) != 0)
+                //     {
+                //         bind_cell5_verts(cell5Col[ci], sc.baseVertsPtr, sc.tet4DVertsPtr);
+                //         const auto& g1s = sc.tet4DVertsPtr[0]->grads;
+                //         const auto& g2s = sc.tet4DVertsPtr[1]->grads;
+                //         const auto& g3s = sc.tet4DVertsPtr[2]->grads;
+                //         const auto& g4s = sc.tet4DVertsPtr[3]->grads;
+                //         const auto& g5s = sc.tet4DVertsPtr[4]->grads;
+                //         dt_sum += abs(g1s(fi,3)) + abs(g2s(fi,3)) + abs(g3s(fi,3)) + abs(g4s(fi,3)) + abs(g5s(fi,3));
+                //         dx_sum += abs(g1s(fi,0)) + abs(g2s(fi,0)) + abs(g3s(fi,0)) + abs(g4s(fi,0)) + abs(g5s(fi,0));
+                //         dy_sum += abs(g1s(fi,1)) + abs(g2s(fi,1)) + abs(g3s(fi,1)) + abs(g4s(fi,1)) + abs(g5s(fi,1));
+                //         dz_sum += abs(g1s(fi,2)) + abs(g2s(fi,2)) + abs(g3s(fi,2)) + abs(g4s(fi,2)) + abs(g5s(fi,2));
+                //     }
+                // }
+                // double local_time_scale = std::max(1.0, (dt_sum + 0.000001)/( (dx_sum + dy_sum + dz_sum)/ 3 + 0.000001));
                 
                 timeQ.emplace_back(
-                    (double)sc.timeLenList[ci] * local_time_scale / MAX_TIME,
+                    (double)sc.timeLenList[ci] * time_scale / MAX_TIME,
                     tid, tetVids[sc.indList[ci]], (int)sc.timeList[ci]);
                 std::push_heap(timeQ.begin(), timeQ.end(), compTime);
                 // break;
@@ -1007,6 +1040,7 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
     bezierFtValsShared.setZero(CSGFuncNum, 35);
 
     for (size_t ci = 0; ci < cell5Col.size(); ci++) {
+
         if (isTemporalRefine) {
             bool isUpdatedTempTet = false;
             if (cell5Col[ci].bot(last_v_ind) == tempRefineTimeVal ||
@@ -1040,29 +1074,34 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
 
         bool eqaulSurf0X = false;
         bool refineB3 = true;
+
         if (!needs_refine && refineB3) {
+            double ef_max_error = 0;
+            // bool choice = false;
             for (size_t id_a = 0; id_a < CSGFuncNum; ++id_a) {
                 if (sc.cellDFunc0XIds.row(ci)(id_a) == 0) continue;
                 for (size_t id_b = id_a + 1; id_b < CSGFuncNum; ++id_b) {
                     if (sc.cellDFunc0XIds.row(ci)(id_b) == 0) continue;
                     needs_refine = refineEqualSurfaceCSG(
                         sc.tet4DVertsPtr, bezierValsShared, bezierFtValsShared,
-                        traj_threshold, {id_a, id_b}, choice, eqaulSurf0X,
+                        traj_threshold, {id_a, id_b}, choice, eqaulSurf0X, ef_max_error,
                         profileTimer, profileCount);
                     if (eqaulSurf0X) {
                         activeCol = true;
                         pairToTets[{id_a, id_b}].push_back(ci);
                     }
+                    if(needs_refine) break;
                 }
+                if(needs_refine) break;
             }
         }
-
         if (needs_refine) {
             sc.subList[ci]     = true;
             sc.timeLenList[ci] = sc.tet4DVertsPtr[0]->time - sc.tet4DVertsPtr[4]->time;
             sc.timeList[ci]    = (sc.tet4DVertsPtr[0]->time + sc.tet4DVertsPtr[4]->time) / 2;
             sc.indList[ci]     = cell5Col[ci].hash[4];
             sc.choiceList[ci]  = choice;
+            // sc.choiceList[ci]  = sc.timeLenList[ci] / double(MAX_TIME) * time_scale > sc.longest_edge_length;
         } else {
             sc.subList[ci] = false;
         }
@@ -1074,6 +1113,7 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
         terminate = true;
         if (sc.choiceList[ci]) {
             if (sc.timeLenList[ci] > MIN_TIME) {
+
                 // double dt_sum = 0; double dx_sum = 0; double dy_sum = 0; double dz_sum = 0; 
                 // for(size_t fi = 0; fi < sc.cellDFunc0XIds.cols(); ++ fi)
                 // {
@@ -1093,10 +1133,13 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
                 // }
                 // double local_time_scale = std::max(1.0, (dt_sum + 0.000001)/( (dx_sum + dy_sum + dz_sum)/ 3 + 0.000001));
                 
-                tl.timeQ.emplace_back(
+                {
+                    tl.timeQ.emplace_back(
                     (double)sc.timeLenList[ci] * time_scale / MAX_TIME,
                     tid, tetVids[sc.indList[ci]], (int)sc.timeList[ci]);
-                std::push_heap(tl.timeQ.begin(), tl.timeQ.end(), compTime);
+                    std::push_heap(tl.timeQ.begin(), tl.timeQ.end(), compTime);
+                }
+                
             }
         } else {
             if (!baseSub) {
@@ -1307,11 +1350,14 @@ static void do_temporal_split(
     // Insert new 4D sample
     vertex4d newVert(funcs.size());
     newVert.time = time;
+    // double tfp = (double)time / MAX_TIME * (time_end_G - time_start_G) + time_start_G;
+    double tfp = (double)time / MAX_TIME;
+
     newVert.coord = {
         timeList.vert4dList[0].coord[0],
         timeList.vert4dList[0].coord[1],
         timeList.vert4dList[0].coord[2],
-        (double)time / MAX_TIME};
+        tfp};
         
     for(size_t dfi = 0; dfi < funcs.size(); ++dfi)
     {
@@ -1368,7 +1414,9 @@ static void do_spatial_split(
     splits++;
     spatial_splits++;
     const std::array<VertexId, 2> vs_old = grid.get_edge_vertices(eid);
+    //  std::cout << "start to split edge" << std::endl;
     auto [vid, eid0, eid1] = grid.split_edge(eid);
+    // std::cout << " split edge successfully " << std::endl;
 
     vertexMap[value_of(vid)] =
         make_new_spatial_vert(grid, vid,
@@ -1537,8 +1585,12 @@ bool gridRefineCSGParallel(
     size_t initial_time_samples,
     double min_tet_radius_ratio,
     double min_tet_edge_length,
-    const std::string& out_dir)
+    const std::string& out_dir,
+    double set_time_start,
+    double set_time_end)
 {
+    time_end_G = set_time_end;
+    time_start_G = set_time_start;
     set_csg_val_func(csg_f);
     init5CGridCSG(initial_time_samples, grid, funcs, MAX_TIME, vertexMap);
 
@@ -1587,7 +1639,7 @@ bool gridRefineCSGParallel(
     size_t tempRefineCount = 0;
     size_t spatialRefineCount = 0;
     refine_using_openmp = true;
-
+    // std::cout << " start to loop refine "<< std::endl;
     while (!candidataTetIds_SM.empty()) {
         const int n = (int)candidataTetIds_SM.size();
         const int num_threads = omp_get_max_threads();
@@ -1610,6 +1662,7 @@ bool gridRefineCSGParallel(
                 push_one_col_tl(curTid, ctx, tl);
             }
         }
+        // std::cout << " start to merege queues " << std::endl;
 
         // ── Serial merge phase ───────────────────────────────────────────
         for (auto& tl : tls) {

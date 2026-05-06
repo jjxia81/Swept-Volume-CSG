@@ -100,7 +100,7 @@ void convert_4d_grid_mtetcol(
         vert4d_num += vert4dList.size();
         for (size_t i = 0; i < vert4dList.size(); i++) {
             Eigen::RowVector4d coord = vert4dList[i].coord;
-            values[vertIt].emplace_back(vert4dList[i].valGradList.second[3]);
+            // values[vertIt].emplace_back(vert4dList[i].valGradList.second[3]);
             time[vertIt].emplace_back(vert4dList[i].coord(3));
         }
         if (cyclic) {

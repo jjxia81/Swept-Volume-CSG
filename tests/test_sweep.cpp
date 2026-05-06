@@ -2,6 +2,7 @@
 #include <queue>
 #include <optional>
 #include <filesystem>
+#include <fstream>
 #include <mtet/io.h>
 #include <igl/doublearea.h>
 #include <igl/per_face_normals.h>
@@ -515,6 +516,54 @@ void check_envelope_edge_id_post_conditions(const sweep::SweepResult& r)
 }
 
 } // namespace
+
+TEST_CASE("CSG sweep supports envelope snapping option", "[CSG][snapping]")
+{
+    auto tmp_root = std::filesystem::temp_directory_path() / "sweep_csg_snapping_test";
+    std::filesystem::create_directories(tmp_root);
+
+    auto write_config = [&](const std::filesystem::path& path, bool with_snapping) {
+        std::ofstream out(path);
+        out << "version: 1.0.0\n"
+            << "grid:\n"
+            << "  resolution: [4, 4, 4]\n"
+            << "  bbox_min: [-0.5, -0.75, -0.75]\n"
+            << "  bbox_max: [1.5, 0.75, 0.75]\n"
+            << "\n"
+            << "parameters:\n"
+            << "  epsilon_env: 0.01\n"
+            << "  epsilon_sil: 0.01\n"
+            << "  with_snapping: " << (with_snapping ? "true" : "false") << "\n"
+            << "  with_insideness_check: false\n"
+            << "  with_adaptive_refinement: true\n"
+            << "  initial_time_samples: 8\n";
+    };
+
+    for (bool with_snapping : {false, true}) {
+        SECTION(with_snapping ? "with_snapping=true" : "with_snapping=false")
+        {
+            auto run_dir = tmp_root / (with_snapping ? "snapping_on" : "snapping_off");
+            std::filesystem::create_directories(run_dir);
+            auto config_path = run_dir / "config.yaml";
+            write_config(config_path, with_snapping);
+
+            auto r = sweep::generalized_sweep_from_config(
+                std::string(DATA_DIR) + "/csg/twoSphere3d.yaml",
+                config_path,
+                run_dir.string());
+
+            REQUIRE(r.envelope.get_num_vertices() > 0);
+            REQUIRE(r.envelope.get_num_facets() > 0);
+            REQUIRE(r.arrangement.get_num_vertices() > 0);
+            REQUIRE(r.arrangement.get_num_facets() > 0);
+            REQUIRE(r.arrangement.has_attribute("valid"));
+            REQUIRE(r.sweep_surface.get_num_vertices() > 0);
+            REQUIRE(r.sweep_surface.get_num_facets() > 0);
+        }
+    }
+
+    std::filesystem::remove_all(tmp_root);
+}
 
 TEST_CASE("envelope_edge_id post-conditions", "[EdgeLabel][examples]")
 {

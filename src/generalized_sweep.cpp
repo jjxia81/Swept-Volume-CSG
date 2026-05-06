@@ -531,7 +531,9 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     size_t num_leafs = funcs.size();
     size_t root_start = csgTreePtr->get_root_index() * num_leafs;
 
-    cell_complex::algorithm::compute_envelope_complex(ccSelect, *csgTreePtr);
+    cell_complex::algorithm::EnvelopeComplexOptions envelope_options;
+    envelope_options.use_snapping = options.with_snapping;
+    cell_complex::algorithm::compute_envelope_complex(ccSelect, *csgTreePtr, envelope_options);
     
     auto sf_end = std::chrono::high_resolution_clock::now();
     logger().info(
@@ -590,6 +592,7 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     
     auto envelope_mesh = envelope_complex_to_mesh2<Scalar, uint32_t>
             (ccSelect, root_start, num_leafs, junction_label_map);
+    result.envelope = envelope_mesh;
 
     // debug_dump_mesh_with_time_ply<Scalar, uint32_t>(
     // options.out_dir + "/debug_01_envelope_mesh.ply", envelope_mesh);

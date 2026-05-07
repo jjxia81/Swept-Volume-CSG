@@ -421,8 +421,9 @@ void extraceFeatureLinesFromCC(cell_complex::CellComplex<4> &ccSelect,
     for (const auto& [edge_key, edge_ref] : ccSelect.get_cells<1>().items()) {
         size_t raw = cell_complex::get_index<1, 4>(edge_key);
         auto it = edge_to_faces.find(raw);
-        if (it == edge_to_faces.end() || it->second.size() != 2) continue;
-   
+        if (it == edge_to_faces.end() || it->second.size() < 2) continue;
+        if(it->second.size() > 2) std::cout << " the edge has more than two neighbor faces " << std::endl;
+        // for(int faceId = 0; faceId < it->second.size())
         const auto& f0 = ccSelect.get_cell<2>(it->second[0]);
         const auto& f1 = ccSelect.get_cell<2>(it->second[1]);
         if( is_silhouette(f0) || is_silhouette(f1))
@@ -489,7 +490,10 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     // std::function<std::span<double>(size_t)> values_func = [&](size_t index) -> std::span<double> {
     //     return values[index];
     // };
-
+    auto saving_start = std::chrono::time_point_cast<std::chrono::microseconds>(
+                                std::chrono::high_resolution_clock::now())
+                                .time_since_epoch()
+                                .count();
     auto sf_start = std::chrono::high_resolution_clock::now();
 
     std::vector<double> timeSamples; 
@@ -507,30 +511,27 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
         timeStartIndices.push_back(timeEndIndex);
     }
 
-    auto cellFromGrid = cell_complex::from_simplicial_columns<4>(verts, simps, timeSamples, timeStartIndices);
-    logger().info("Successfully generated column grid");
-    verts.clear(); simps.clear();timeSamples.clear();
-    timeStartIndices.clear(); time.clear();
-    auto saving_start = std::chrono::time_point_cast<std::chrono::microseconds>(
-                            std::chrono::high_resolution_clock::now())
-                            .time_since_epoch()
-                            .count();
-
-    auto &ccSelect = cellFromGrid;
-    // bool use_config_file = false;
-    // if(use_config_file)
-    // {
-    //     std::string grid_config_path = "/home/jjxia/Documents/projects/Swept-Volume-CSG/data/csg/config_test.yaml";
-    //     auto ccFromFile = cell_complex::load_uniform_grid<4>(grid_config_path);
-    //     logger().info("cell complex successfully generated from config file");
-    //     ccSelect =   ccFromFile;
-    // }
-    
-
+    bool use_config_file = false;
+    cell_complex::CellComplex<4> ccSelect;
+    if(!use_config_file)
+    {
+        ccSelect = cell_complex::from_simplicial_columns<4>(verts, simps, timeSamples, timeStartIndices);
+        logger().info("Successfully generated column grid");
+        verts.clear(); simps.clear();timeSamples.clear();
+        timeStartIndices.clear(); time.clear();
+        
+        // auto &ccSelect = cellFromGrid;
+    } else {
+        std::string grid_config_path = "/home/jjxia/Documents/projects/Swept-Volume-CSG/data/csg/config_test.yaml";
+        ccSelect = cell_complex::load_uniform_grid<4>(grid_config_path);
+        logger().info("cell complex successfully generated from config file");
+       
+    }
+    ccSelect.refine_long_edges(0.1);
     cell_complex::algorithm::compute_silhouette_complex(ccSelect, *csgTreePtr);
     // cell_complex::save_obj(options.out_dir + "/silhouette.obj", ccSelect);
     // cell_complex::save_msh(options.out_dir + "/silhouette.msh", ccSelect);
-    cellFromGrid.validate();
+    ccSelect.validate();
 
     // Alternative: select edges where the root-level dominance spans >1 leaf
     size_t num_leafs = funcs.size();

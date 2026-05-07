@@ -1669,7 +1669,7 @@ void save_sweep_surface_ply(
             out << V(vi, 0) << ' '
                 << V(vi, 1) << ' '
                 << V(vi, 2) << ' '
-                << static_cast<float>(vertex_quality[vi]) << ' '
+                << static_cast<float>(T[vi]) << ' '
                 << T[vi] << '\n';
         }
     } else {

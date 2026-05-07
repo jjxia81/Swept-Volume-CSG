@@ -18,5 +18,6 @@ include(CPM)
 CPMAddPackage(
     NAME stf
     GITHUB_REPOSITORY jjxia81/space-time-functions
-    GIT_TAG main
+    # GIT_TAG main
+    GIT_TAG csg_dynamic
 )

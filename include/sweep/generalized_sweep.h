@@ -103,6 +103,9 @@ struct SweepOptions {
     /// Whether to enable vertex snapping during isocontouring.
     bool with_snapping = true;
 
+    /// Whether to use Halley's method for envelope cut-vertex placement.
+    bool with_halley = false;
+
     /// Whether the trajectory is cyclic.
     ///
     /// This feature is experimental and is not fully supported.

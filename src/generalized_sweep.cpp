@@ -298,6 +298,7 @@ void log_config(const GridSpec& grid_spec, const SweepOptions& options)
     sweep::logger().info("Max splits: {}", options.max_split);
     sweep::logger().info("Insideness check: {}", options.with_insideness_check);
     sweep::logger().info("Vertex snapping: {}", options.with_snapping);
+    sweep::logger().info("Halley envelope root finding: {}", options.with_halley);
     sweep::logger().info("Cyclic trajectory: {}", options.cyclic);
     sweep::logger().info("Volume threshold: {}", options.volume_threshold);
     sweep::logger().info("Face count threshold: {}", options.face_count_threshold);
@@ -354,6 +355,9 @@ void load_config(std::filesystem::path config_path,
         }
         if (param_config["with_snapping"]) {
             options.with_snapping = param_config["with_snapping"].as<bool>();
+        }
+        if (param_config["with_halley"]) {
+            options.with_halley = param_config["with_halley"].as<bool>();
         }
         if (param_config["cyclic"]) {
             options.cyclic = param_config["cyclic"].as<bool>();
@@ -537,7 +541,7 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     size_t num_leafs = funcs.size();
     size_t root_start = csgTreePtr->get_root_index() * num_leafs;
 
-    cell_complex::algorithm::compute_envelope_complex(ccSelect, *csgTreePtr);
+    cell_complex::algorithm::compute_envelope_complex(ccSelect, *csgTreePtr, options.with_halley);
     
     auto sf_end = std::chrono::high_resolution_clock::now();
     logger().info(

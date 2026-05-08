@@ -1,5 +1,8 @@
 build/
 build-python/
+build-csg-halley-tests/
+Output/
+.DS_Store
 
 # Python
 __pycache__/

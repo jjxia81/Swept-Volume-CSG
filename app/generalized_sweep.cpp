@@ -163,6 +163,9 @@ void load_config(std::string config_file, sweep::GridSpec& grid_spec, sweep::Swe
         if (param_config["with_snapping"]) {
             options.with_snapping = param_config["with_snapping"].as<bool>();
         }
+        if (param_config["with_halley"]) {
+            options.with_halley = param_config["with_halley"].as<bool>();
+        }
         if (param_config["cyclic"]) {
             options.cyclic = param_config["cyclic"].as<bool>();
         }
@@ -200,6 +203,7 @@ int main(int argc, const char* argv[])
         int rot = 0;
         bool without_insideness_check = false;
         bool without_snapping = false;
+        bool with_halley = false;
         bool without_opt_triangulation = false;
         bool cyclic = false;
     } args;
@@ -219,6 +223,10 @@ int main(int argc, const char* argv[])
         "--without-snapping",
         args.without_snapping,
         "Disable vertex snapping in iso-surfacing step");
+    app.add_flag(
+        "--with-halley",
+        args.with_halley,
+        "Use Halley's method for envelope cut-vertex placement");
     app.add_flag(
         "--without-optimal-triangulation",
         args.without_opt_triangulation,
@@ -315,6 +323,7 @@ int main(int argc, const char* argv[])
         options.max_split = max_splits;
         options.with_insideness_check = insideness_check;
         options.with_snapping = !args.without_snapping;
+        options.with_halley = args.with_halley;
         options.cyclic = args.cyclic;
         grid_spec.bbox_max = csgfTet::bbox_max;
         grid_spec.bbox_min = csgfTet::bbox_min;

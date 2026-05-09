@@ -6,5 +6,5 @@ include(CPM)
 CPMAddPackage(
     NAME cellcomplex
     GITHUB_REPOSITORY duxingyi-charles/cell-complex
-    GIT_TAG 7073c540bc245c5537c71531fe4c792e5b9e3c26
+    GIT_TAG 3c37ff463468d434251d057c72d9ba2f78c4db93
 )

@@ -93,29 +93,38 @@ std::vector<FuncType> make_leaf_functions(stf::CSGTree<3>& tree)
 {
     // auto leaf_funcs = tree.get_leaf_functions();
     tree.bake_transforms();
-    auto leaves = tree.get_leaves();
-    
-    std::vector<FuncType> funcs;
-    funcs.reserve(leaves.size());
+    // auto leaves = tree.get_leaves();
+  
+    std::vector<int> indices;
+    tree.visit_postorder([&](const stf::CSGTree<3>::NodeInfo& info) {
+        if (info.is_leaf()) {
+            indices.push_back(info.node_index);
+        }
+    });
 
-    for (auto nodeFunc : leaves)
+    std::vector<FuncType> funcs;
+    funcs.reserve(indices.size());
+
+    for (auto node_idx : indices)
     {
-        funcs.push_back([nodeFunc](Eigen::RowVector4d pt) -> std::pair<double, Eigen::RowVector4d>
+        funcs.push_back([node_idx, tree](Eigen::RowVector4d pt) -> std::pair<double, Eigen::RowVector4d>
         {
             std::array<double, 3> pos = {pt[0], pt[1], pt[2]};
             double t = pt[3];
-            auto pos_in = nodeFunc.transform
-                ? nodeFunc.transform->transform(pos, t)
-                : pos;
+            // auto pos_in = nodeFunc.transform
+            //     ? nodeFunc.transform->transform(pos, t)
+            //     : pos;
+
+            auto [v, grad] = tree.value_and_gradient_at(node_idx, pos, t);
             
 
-            double val = nodeFunc.function->value(pos_in, t);
-            auto grad  = nodeFunc.function->gradient(pos_in, t);  // std::array<Scalar, 4>
+            // double val = nodeFunc.function->value(pos_in, t);
+            // auto grad  = nodeFunc.function->gradient(pos_in, t);  // std::array<Scalar, 4>
 
             Eigen::RowVector4d grad_eigen;
             grad_eigen << grad[0], grad[1], grad[2], grad[3];
 
-            return {val, grad_eigen};
+            return {v, grad_eigen};
         });
     }
 

@@ -615,7 +615,6 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
             sc.timeList[ci]    = (sc.tet4DVertsPtr[0]->time + sc.tet4DVertsPtr[4]->time) / 2;
             sc.indList[ci]     = cell5Col[ci].hash[4];
             sc.choiceList[ci]  = choice;
-
             sc.choiceList[ci]  = sc.timeLenList[ci] /double(MAX_TIME) * time_scale 
                                 > sc.longest_edge_length;
             
@@ -634,7 +633,8 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
     for (size_t ci = 0; ci < cell5Col.size(); ci++) {
         if (!sc.subList[ci]) continue;
         terminate = true;
-        if (sc.choiceList[ci]) {
+        if (sc.choiceList[ci]) 
+        {
             if (sc.timeLenList[ci] > MIN_TIME) {
                 
                 // double dt_sum = 0; double dx_sum = 0; double dy_sum = 0; double dz_sum = 0; 
@@ -665,8 +665,18 @@ static void push_one_col(mtet::TetId tid, PushOneColCtx& ctx)
         } else {
             if(!baseSub)
             {
-                try_push_space(spaceQ, baseSub, tid,
+                if(sc.longest_edge_length > min_tet_edge_length)
+                {
+                    try_push_space(spaceQ, baseSub, tid,
                            sc.longest_edge, sc.longest_edge_length, min_tet_edge_length);
+                } else if(sc.timeLenList[ci] > MIN_TIME)
+                {
+                    timeQ.emplace_back(
+                    (double)sc.timeLenList[ci] * time_scale / MAX_TIME,
+                    tid, tetVids[sc.indList[ci]], (int)sc.timeList[ci]);
+                    std::push_heap(timeQ.begin(), timeQ.end(), compTime);
+                }
+                
             }
             // break;
         }
@@ -1101,7 +1111,7 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
             sc.timeList[ci]    = (sc.tet4DVertsPtr[0]->time + sc.tet4DVertsPtr[4]->time) / 2;
             sc.indList[ci]     = cell5Col[ci].hash[4];
             sc.choiceList[ci]  = choice;
-            // sc.choiceList[ci]  = sc.timeLenList[ci] / double(MAX_TIME) * time_scale > sc.longest_edge_length;
+            sc.choiceList[ci]  = sc.timeLenList[ci] / double(MAX_TIME) * time_scale > sc.longest_edge_length;
         } else {
             sc.subList[ci] = false;
         }

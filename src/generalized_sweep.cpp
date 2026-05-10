@@ -527,8 +527,11 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
         logger().info("cell complex successfully generated from config file");
        
     }
-    ccSelect.refine_long_edges(0.1);
-    cell_complex::algorithm::compute_silhouette_complex(ccSelect, *csgTreePtr);
+    
+    cell_complex::algorithm::SilhouetteComplexOptions cell_options;
+    cell_options.max_temporal_edge_length = 0.01; // Adjust as needed
+    // ccSelect.refine_long_edges(0.002);
+    cell_complex::algorithm::compute_silhouette_complex(ccSelect, *csgTreePtr, cell_options);
     // cell_complex::save_obj(options.out_dir + "/silhouette.obj", ccSelect);
     // cell_complex::save_msh(options.out_dir + "/silhouette.msh", ccSelect);
     ccSelect.validate();
@@ -537,7 +540,10 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     size_t num_leafs = funcs.size();
     size_t root_start = csgTreePtr->get_root_index() * num_leafs;
 
-    cell_complex::algorithm::compute_envelope_complex(ccSelect, *csgTreePtr);
+    // cell_complex::algorithm::EnvelopeComplexOptions envelope_options;
+    // envelope_options.use_snapping = options.with_snapping;
+    bool use_halley_methtod = true;
+    cell_complex::algorithm::compute_envelope_complex(ccSelect, *csgTreePtr, use_halley_methtod);
     
     auto sf_end = std::chrono::high_resolution_clock::now();
     logger().info(
@@ -597,9 +603,16 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     auto envelope_mesh = envelope_complex_to_mesh2<Scalar, uint32_t>
             (ccSelect, root_start, num_leafs, junction_label_map);
 
+    // auto cleaned = remove_boundary_faces<Scalar, uint32_t>(envelope_mesh);
+    // auto cleaned   = remove_degenerate_faces<Scalar, uint32_t>(envelope_mesh, 1e-16);
+
     save_sweep_surface_ply<Scalar, uint32_t>(
     options.out_dir + "/envelop_surface_labeled.ply",
     envelope_mesh);
+
+    // save_sweep_surface_ply<Scalar, uint32_t>(
+    // options.out_dir + "/envelop_surface_labeled_cleaned.ply",
+    // envelope_mesh);
     // debug_dump_mesh_with_time_ply<Scalar, uint32_t>(
     // options.out_dir + "/debug_01_envelope_mesh.ply", envelope_mesh);
 
@@ -646,9 +659,9 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     options.out_dir + "/sweep_feature_edges_labeled.ply",
     result.sweep_surface);
 
-    save_labeled_edges_msh<Scalar, uint32_t>(
-    options.out_dir + "/sweep_feature_edges_labeled.msh",
-    result.sweep_surface);
+    // save_labeled_edges_msh<Scalar, uint32_t>(
+    // options.out_dir + "/sweep_feature_edges_labeled.msh",
+    // result.sweep_surface);
 
     save_sweep_surface_ply<Scalar, uint32_t>(
     options.out_dir + "/sweep_surface_labeled.ply",

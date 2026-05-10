@@ -18,6 +18,10 @@ include(CPM)
 CPMAddPackage(
     NAME stf
     GITHUB_REPOSITORY jjxia81/space-time-functions
-    # GIT_TAG main
-    GIT_TAG csg_dynamic
+    GIT_TAG main
+    OPTIONS
+        "STF_BUILD_TESTS OFF"
+        "STF_YAML_PARSER ON"
+        "STF_PYTHON_BINDING OFF"
+    # GIT_TAG csg_dynamic
 )

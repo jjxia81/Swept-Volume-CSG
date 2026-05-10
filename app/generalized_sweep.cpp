@@ -89,22 +89,28 @@ sweep::CSGFunction make_csg_function(const stf::CSGTree<3>& tree)
 }
 
 using FuncType = std::function<std::pair<double, Eigen::RowVector4d>(Eigen::RowVector4d)> ;
-std::vector<FuncType> make_leaf_functions(const stf::CSGTree<3>& tree)
+std::vector<FuncType> make_leaf_functions(stf::CSGTree<3>& tree)
 {
-    auto leaf_funcs = tree.get_leaf_functions();
+    // auto leaf_funcs = tree.get_leaf_functions();
+    tree.bake_transforms();
+    auto leaves = tree.get_leaves();
     
     std::vector<FuncType> funcs;
-    funcs.reserve(leaf_funcs.size());
+    funcs.reserve(leaves.size());
 
-    for (auto* func : leaf_funcs)
+    for (auto nodeFunc : leaves)
     {
-        funcs.push_back([func](Eigen::RowVector4d pt) -> std::pair<double, Eigen::RowVector4d>
+        funcs.push_back([nodeFunc](Eigen::RowVector4d pt) -> std::pair<double, Eigen::RowVector4d>
         {
             std::array<double, 3> pos = {pt[0], pt[1], pt[2]};
             double t = pt[3];
+            auto pos_in = nodeFunc.transform
+                ? nodeFunc.transform->transform(pos, t)
+                : pos;
+            
 
-            double val = func->value(pos, t);
-            auto grad  = func->gradient(pos, t);  // std::array<Scalar, 4>
+            double val = nodeFunc.function->value(pos_in, t);
+            auto grad  = nodeFunc.function->gradient(pos_in, t);  // std::array<Scalar, 4>
 
             Eigen::RowVector4d grad_eigen;
             grad_eigen << grad[0], grad[1], grad[2], grad[3];
@@ -202,6 +208,8 @@ int main(int argc, const char* argv[])
         bool without_snapping = false;
         bool without_opt_triangulation = false;
         bool cyclic = false;
+        bool is_static_func = false;
+        double static_frame_time = 0.0; 
     } args;
     CLI::App app{"Generalized Swept Volume"};
     app.add_option("output", args.output_path, "Output path")->required();
@@ -224,6 +232,9 @@ int main(int argc, const char* argv[])
         args.without_opt_triangulation,
         "Disable optimal triangulation in iso-surfacing triangulation step");
     app.add_flag("--cyclic", args.cyclic, "Whether the trajectory is cyclic or not");
+    app.add_flag("--static", args.is_static_func, "Whether the sweep function is static or not");
+    app.add_option("--st", args.static_frame_time, "set the time value for the static frame");
+
     CLI11_PARSE(app, argc, argv);
 
     using Scalar = sweep::Scalar;
@@ -245,7 +256,6 @@ int main(int argc, const char* argv[])
 
     std::vector<FuncType> funcs;
     sweep::CSGFunction csg_f; 
-    stf::OwnedCSGTree<3> fileCSGFunc;
     stf::ManagedSpaceTimeFunction<3>* managed; 
     std::unique_ptr<stf::SpaceTimeFunction<3>> funPtr;
     stf::CSGTree<3>* csgTreePtr = nullptr;
@@ -271,8 +281,12 @@ int main(int argc, const char* argv[])
                 sweep::logger().info("The provided space-time function is not a CSG tree.");
                 throw std::runtime_error("Expected a CSG tree as input.");
             }
-            // fileCSGFunc = stf::YamlParser<3>::parse_csg_from_file(args.function_file);
-            // stf::CSGTree<3>* csg = fileCSGFunc.get(); 
+            
+            if(args.is_static_func)
+            {
+                csgTreePtr->set_static_time(args.static_frame_time);
+            }
+            
             csgTreePtr->build_flat_plan();
             if(!input_csg_funcs)
             {

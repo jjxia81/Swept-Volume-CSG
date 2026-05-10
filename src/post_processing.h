@@ -1554,6 +1554,7 @@ void save_labeled_edges_ply(
     for (const auto& e : kept) {
         Index a = register_vertex(e.v0, e.label);
         Index b = register_vertex(e.v1, e.label);
+        
         edge_indices.emplace_back(a, b, e.label);
     }
 
@@ -2251,6 +2252,217 @@ void save_labeled_edges_msh(
 
     // ------------------- Write -------------------
     mshio::save_msh(filename, spec);
+}
+template <typename Scalar, typename Index>
+lagrange::SurfaceMesh<Scalar, Index> remove_boundary_faces(
+    const lagrange::SurfaceMesh<Scalar, Index>& mesh)
+{
+    using Mesh = lagrange::SurfaceMesh<Scalar, Index>;
+    const Index num_vertices = mesh.get_num_vertices();
+    const Index num_facets = mesh.get_num_facets();
+
+    // ---------- 1. Read input attributes (preserve face + corner data) ----------
+    bool has_time = mesh.has_attribute("time");
+    bool has_face_label = mesh.has_attribute("face_label");
+    bool has_face_dom = mesh.has_attribute("face_dom_chunk");
+    bool has_corner_attr = mesh.has_attribute("corner_edge_label");
+
+    auto get_time = [&]() {
+        return lagrange::attribute_vector_view<Scalar>(mesh, "time");
+    };
+    auto get_face_label = [&]() {
+        return lagrange::attribute_vector_view<uint8_t>(mesh, "face_label");
+    };
+    auto get_face_dom = [&]() {
+        return lagrange::attribute_vector_view<uint64_t>(mesh, "face_dom_chunk");
+    };
+    auto get_corner = [&]() {
+        return lagrange::attribute_vector_view<int32_t>(mesh, "corner_edge_label");
+    };
+
+    // ---------- 2. Build edge incidence map ----------
+    auto edge_key = [](Index a, Index b) -> uint64_t {
+        if (a > b) std::swap(a, b);
+        return (static_cast<uint64_t>(a) << 32) | static_cast<uint64_t>(b);
+    };
+
+    ankerl::unordered_dense::map<uint64_t, uint32_t> edge_count;
+    ankerl::unordered_dense::map<uint64_t, std::vector<Index>> edge_to_facets;
+    edge_count.reserve(num_facets * 3);
+    edge_to_facets.reserve(num_facets * 3);
+
+    for (Index f = 0; f < num_facets; ++f) {
+        const Index fs = mesh.get_facet_size(f);
+        if (fs < 3) continue;
+        for (Index k = 0; k < fs; ++k) {
+            Index a = mesh.get_facet_vertex(f, k);
+            Index b = mesh.get_facet_vertex(f, (k + 1) % fs);
+            uint64_t key = edge_key(a, b);
+            edge_count[key]++;
+            edge_to_facets[key].push_back(f);
+        }
+    }
+
+    // ---------- 3. Iteratively mark boundary-dominated facets for removal ----------
+    std::vector<uint8_t> kept(num_facets, 1);
+
+    auto is_majority_boundary = [&](Index f) -> bool {
+        if (!kept[f]) return false;
+        const Index fs = mesh.get_facet_size(f);
+        if (fs < 3) return false;
+        size_t boundary_edges = 0;
+        for (Index k = 0; k < fs; ++k) {
+            Index a = mesh.get_facet_vertex(f, k);
+            Index b = mesh.get_facet_vertex(f, (k + 1) % fs);
+            auto it = edge_count.find(edge_key(a, b));
+            if (it != edge_count.end() && it->second == 1) {
+                ++boundary_edges;
+            }
+        }
+        return boundary_edges * 2 > static_cast<size_t>(fs); // strictly > half
+    };
+
+    std::vector<Index> worklist;
+    worklist.reserve(num_facets);
+    for (Index f = 0; f < num_facets; ++f) {
+        if (is_majority_boundary(f)) worklist.push_back(f);
+    }
+
+    while (!worklist.empty()) {
+        Index f = worklist.back();
+        worklist.pop_back();
+        if (!kept[f]) continue;
+        if (!is_majority_boundary(f)) continue;
+
+        const Index fs = mesh.get_facet_size(f);
+        for (Index k = 0; k < fs; ++k) {
+            Index a = mesh.get_facet_vertex(f, k);
+            Index b = mesh.get_facet_vertex(f, (k + 1) % fs);
+            uint64_t key = edge_key(a, b);
+
+            auto cit = edge_count.find(key);
+            if (cit != edge_count.end() && cit->second > 0) cit->second--;
+
+            auto eit = edge_to_facets.find(key);
+            if (eit != edge_to_facets.end()) {
+                for (Index other : eit->second) {
+                    if (other == f || !kept[other]) continue;
+                    if (is_majority_boundary(other)) {
+                        worklist.push_back(other);
+                    }
+                }
+            }
+        }
+        kept[f] = 0;
+    }
+
+    // ---------- 4. Compact vertices: keep only those still referenced ----------
+    std::vector<Index> old_to_new(num_vertices, std::numeric_limits<Index>::max());
+    std::vector<Index> new_to_old;
+    new_to_old.reserve(num_vertices);
+
+    for (Index f = 0; f < num_facets; ++f) {
+        if (!kept[f]) continue;
+        const Index fs = mesh.get_facet_size(f);
+        for (Index k = 0; k < fs; ++k) {
+            Index ov = mesh.get_facet_vertex(f, k);
+            if (old_to_new[ov] == std::numeric_limits<Index>::max()) {
+                old_to_new[ov] = static_cast<Index>(new_to_old.size());
+                new_to_old.push_back(ov);
+            }
+        }
+    }
+    const Index new_num_vertices = static_cast<Index>(new_to_old.size());
+
+    // ---------- 5. Build output mesh ----------
+    Mesh out;
+    out.add_vertices(new_num_vertices);
+
+    if (has_time) {
+        out.template create_attribute<Scalar>(
+            "time", lagrange::AttributeElement::Vertex,
+            lagrange::AttributeUsage::Scalar, 1);
+    }
+    auto in_time_view = has_time ? get_time()
+                                 : lagrange::attribute_vector_view<Scalar>(mesh, ""); // unused
+    auto out_time_ref = has_time
+        ? lagrange::attribute_vector_ref<Scalar>(out, "time")
+        : lagrange::attribute_vector_ref<Scalar>(out, "time"); // unused if !has_time
+
+    for (Index nv = 0; nv < new_num_vertices; ++nv) {
+        Index ov = new_to_old[nv];
+        auto src = mesh.get_position(ov);
+        auto dst = out.ref_position(nv);
+        dst[0] = src[0];
+        dst[1] = src[1];
+        dst[2] = src[2];
+        if (has_time) {
+            out_time_ref[nv] = in_time_view[ov];
+        }
+    }
+
+    // Add facets and gather per-facet / per-corner attributes.
+    std::vector<uint8_t> kept_face_label;
+    std::vector<uint64_t> kept_face_dom;
+    std::vector<int32_t> kept_corner_labels;
+
+    auto in_face_label_view = has_face_label
+        ? get_face_label()
+        : lagrange::attribute_vector_view<uint8_t>(mesh, ""); // unused
+    auto in_face_dom_view = has_face_dom
+        ? get_face_dom()
+        : lagrange::attribute_vector_view<uint64_t>(mesh, ""); // unused
+    auto in_corner_view = has_corner_attr
+        ? get_corner()
+        : lagrange::attribute_vector_view<int32_t>(mesh, ""); // unused
+
+    lagrange::SmallVector<Index, 16> polygon;
+
+    for (Index f = 0; f < num_facets; ++f) {
+        if (!kept[f]) continue;
+        const Index fs = mesh.get_facet_size(f);
+        const Index c0 = mesh.get_facet_corner_begin(f);
+
+        polygon.clear();
+        polygon.reserve(fs);
+        for (Index k = 0; k < fs; ++k) {
+            polygon.push_back(old_to_new[mesh.get_facet_vertex(f, k)]);
+        }
+        out.add_polygon({polygon.data(), polygon.size()});
+
+        if (has_face_label) kept_face_label.push_back(in_face_label_view[f]);
+        if (has_face_dom) kept_face_dom.push_back(in_face_dom_view[f]);
+        if (has_corner_attr) {
+            for (Index k = 0; k < fs; ++k) {
+                kept_corner_labels.push_back(in_corner_view[c0 + k]);
+            }
+        }
+    }
+
+    // ---------- 6. Write output attributes ----------
+    if (has_face_label) {
+        out.template create_attribute<uint8_t>(
+            "face_label", lagrange::AttributeElement::Facet,
+            lagrange::AttributeUsage::Scalar, 1);
+        auto attr = lagrange::attribute_vector_ref<uint8_t>(out, "face_label");
+        std::copy(kept_face_label.begin(), kept_face_label.end(), attr.data());
+    }
+    if (has_face_dom) {
+        out.template create_attribute<uint64_t>(
+            "face_dom_chunk", lagrange::AttributeElement::Facet,
+            lagrange::AttributeUsage::Scalar, 1);
+        auto attr = lagrange::attribute_vector_ref<uint64_t>(out, "face_dom_chunk");
+        std::copy(kept_face_dom.begin(), kept_face_dom.end(), attr.data());
+    }
+    if (has_corner_attr && !kept_corner_labels.empty()) {
+        out.template create_attribute<int32_t>(
+            "corner_edge_label", lagrange::AttributeElement::Corner,
+            lagrange::AttributeUsage::Scalar, 1);
+        auto attr = lagrange::attribute_vector_ref<int32_t>(out, "corner_edge_label");
+        std::copy(kept_corner_labels.begin(), kept_corner_labels.end(), attr.data());
+    }
+
+    return out;
 }
 
 #endif /* post_processing_h */

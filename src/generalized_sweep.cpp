@@ -105,13 +105,14 @@ std::tuple<
     std::vector<std::vector<Scalar>>>
 refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs, 
     CSGFunction csg_f,
-    mtet::MTetMesh& grid, const SweepOptions& options)
+    mtet::MTetMesh& voidgrid, 
+    const SweepOptions& options)
 {
     logger().info("Adaptively refine the background grid...");
 
     // TODO: investigate why saving and loading is necessary here???
-    mtet::save_mesh("init.msh", grid);
-    grid = mtet::load_mesh("init.msh");
+    // mtet::save_mesh("init.msh", grid);
+    mtet::MTetMesh grid = mtet::load_mesh("init.msh");
     std::filesystem::remove("init.msh");
 
     vertExtrude vertexMap;
@@ -454,6 +455,7 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     SweepResult result;
     auto grid =
         mtet::generate_tet_grid(grid_spec.resolution, grid_spec.bbox_min, grid_spec.bbox_max);
+        mtet::save_mesh("init.msh", grid);
     auto init_grid_end = std::chrono::high_resolution_clock::now();
     logger().info(
         "Initial grid generation time: {} seconds",
@@ -518,8 +520,7 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
         ccSelect = cell_complex::from_simplicial_columns<4>(verts, simps, timeSamples, timeStartIndices);
         logger().info("Successfully generated column grid");
         verts.clear(); simps.clear();timeSamples.clear();
-        timeStartIndices.clear(); time.clear();
-        
+        timeStartIndices.clear(); time.clear();        
         // auto &ccSelect = cellFromGrid;
     } else {
         std::string grid_config_path = "/home/jjxia/Documents/projects/Swept-Volume-CSG/data/csg/config_test.yaml";

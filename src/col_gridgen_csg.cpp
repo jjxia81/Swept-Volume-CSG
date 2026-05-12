@@ -81,8 +81,6 @@ void init5CGridCSG(
                 vert.vals[fi] = res.first;
                 vert.grads.row(fi) = res.second;
             }
-            vert.valGradList = csg_funcs[0](vert.coord);
-            // std::cout << " vert.grads " << vert.grads << std::endl;
             vertColList[i] = vert;
         }
         col.vert4dList = vertColList;
@@ -123,8 +121,8 @@ mtet::Scalar calTimeGlobalScaleWithInitGridCSG(vertExtrude& vertexMap)
             // gs_sum += std::sqrt(grad[0] * grad[0] + grad[1]* grad[1] + grad[2] * grad[2]);
         }
     }
-    mtet::Scalar time_gs = gt_sum / gs_sum;
-    return time_gs;
+    mtet::Scalar time_gs = gt_sum / gs_sum ;
+    return time_gs > 1 ? time_gs: 1.0;
 }
 
 static auto compTime = [](const TimeElem& a, const TimeElem& b) {

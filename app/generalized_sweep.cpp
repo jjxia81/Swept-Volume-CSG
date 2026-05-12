@@ -342,6 +342,17 @@ int main(int argc, const char* argv[])
         grid_spec.bbox_max = csgfTet::bbox_max;
         grid_spec.bbox_min = csgfTet::bbox_min;
     }
+
+    double dx = grid_spec.bbox_max[0] - grid_spec.bbox_min[0]; 
+    double dy = grid_spec.bbox_max[1] - grid_spec.bbox_min[1]; 
+    double dz = grid_spec.bbox_max[2] - grid_spec.bbox_min[2]; 
+
+    double max_bbox_len = std::max(std::max(dx, dy), dz);
+    
+    options.epsilon_env *= max_bbox_len;
+    options.epsilon_sil *= max_bbox_len;
+
+    options.min_tet_edge_length *= max_bbox_len;
     
     
     if(input_csg_funcs)

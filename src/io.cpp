@@ -6,7 +6,7 @@
 //
 #include "io.h"
 #include <sweep/logger.h>
-
+#include "col_gridgen.h"
 #include <queue>
 
 
@@ -68,11 +68,14 @@ void convert_4d_grid_mtetcol(
     mtet::MTetMesh grid,
     vertExtrude vertexMap,
     std::unordered_map<uint64_t, int>& activeColMap,
+    std::unordered_map<uint64_t, int>& markTetMap,
+    std::unordered_map<uint64_t, std::vector<size_t>>& markTetActive4DtetIdsMap,
     std::vector<double>& verts,
     std::vector<size_t>& simps,
     std::vector<int>& tetActiveTags,
+    std::vector<int>& tetMarkTags,
+    std::vector<std::vector<size_t>>& tetMarkActive4DtetIds,
     std::vector<std::vector<double>>& time,
-    std::vector<std::vector<double>>& values,
     const std::string& out_dir,
     bool cyclic)
 {
@@ -83,7 +86,6 @@ void convert_4d_grid_mtetcol(
     simps.reserve(tet_num * 4);
     tetActiveTags.reserve(tet_num);
     time.reserve(vert_num);
-    values.reserve(vert_num);
     size_t vertIt = 0;
     using IndexMap = ankerl::unordered_dense::map<uint64_t, size_t>;
     IndexMap ind4DMap;
@@ -93,9 +95,7 @@ void convert_4d_grid_mtetcol(
         verts.emplace_back(static_cast<double>(data[2]));
         vertexCol::vert4d_list vert4dList = vertexMap[value_of(vid)].vert4dList;
         ind4DMap[value_of(vid)] = vertIt;
-        values.emplace_back(std::vector<double>{});
         time.emplace_back(std::vector<double>{});
-        values[vertIt].reserve(vert4dList.size());
         time[vertIt].reserve(vert4dList.size());
         vert4d_num += vert4dList.size();
         for (size_t i = 0; i < vert4dList.size(); i++) {
@@ -103,12 +103,127 @@ void convert_4d_grid_mtetcol(
             // values[vertIt].emplace_back(vert4dList[i].valGradList.second[3]);
             time[vertIt].emplace_back(vert4dList[i].coord(3));
         }
-        if (cyclic) {
-            values[vertIt].back() = values[vertIt].front();
-        }
         vertIt++;
     });
     size_t active_tet_count = 0;
+    size_t mark_tet_count = 0;
+    bool mark_one_ring_tets = true;
+    int mark_ring_depth = 0;
+    std::unordered_set<uint64_t> marked_tet_keys;
+
+    auto get_tet_key = [&](TetId tid) {
+        std::span<VertexId, 4> tvs = grid.get_tet(tid);
+        return getTetKeyByVidsIO(tvs);
+    };
+
+    auto is_active_tet_key = [&](uint64_t tetKey) {
+        return activeColMap.find(tetKey) != activeColMap.end();
+    };
+
+    auto collect_neighboring_tets_by_edge = [&](mtet::EdgeId eid) {
+        std::vector<TetId> neighbor_tets;
+
+        grid.foreach_tet_around_edge(eid, [&](TetId t) {
+            uint64_t tetKey = get_tet_key(t);
+
+            // Preserve your current behavior: only expand into active tets.
+            if (is_active_tet_key(tetKey)) {
+                neighbor_tets.push_back(t);
+            }
+        });
+
+        return neighbor_tets;
+    };
+
+    auto collect_neighboring_tets_by_tet = [&](TetId tid) {
+        std::vector<TetId> neighbor_tets;
+
+        grid.foreach_edge_in_tet(tid, [&](mtet::EdgeId eid, mtet::VertexId, mtet::VertexId) {
+            auto edge_neighbors = collect_neighboring_tets_by_edge(eid);
+            neighbor_tets.insert(
+                neighbor_tets.end(),
+                edge_neighbors.begin(),
+                edge_neighbors.end());
+        });
+
+        return neighbor_tets;
+    };
+
+    std::vector<TetId> frontier;
+
+    grid.seq_foreach_tet([&](TetId tid, [[maybe_unused]] std::span<const VertexId, 4> data) {
+        uint64_t tetKey = get_tet_key(tid);
+
+        if (markTetMap.find(tetKey) != markTetMap.end()) {
+            marked_tet_keys.insert(tetKey);
+            frontier.push_back(tid);
+        }
+    });
+
+    for (int ring = 0; ring < mark_ring_depth; ++ring) {
+        std::vector<TetId> next_frontier;
+
+        for (TetId tid : frontier) {
+            auto neighbor_tets = collect_neighboring_tets_by_tet(tid);
+
+            for (TetId neighbor_tid : neighbor_tets) {
+                uint64_t neighbor_key = get_tet_key(neighbor_tid);
+
+                auto [_, inserted] = marked_tet_keys.insert(neighbor_key);
+                if (inserted) {
+                    next_frontier.push_back(neighbor_tid);
+                }
+            }
+        }
+
+        frontier = std::move(next_frontier);
+
+        if (frontier.empty()) {
+            break;
+        }
+    }
+    // std::unordered_set<uint64_t> marked_tet_keys;
+    // auto collect_neighboring_tets_by_edge = [&](mtet::EdgeId eid) 
+    //     {
+    //         std::vector<uint64_t> neig_tet_keys;
+    //         grid.foreach_tet_around_edge(eid, [&](mtet::TetId t) {
+    //             std::span<VertexId, 4> tvs = grid.get_tet(t);
+    //             auto tetKey = getTetKeyByVidsIO(tvs);
+    //             if(activeColMap.find(tetKey) != activeColMap.end())
+    //             neig_tet_keys.push_back(tetKey); 
+    //         }); 
+    //         return neig_tet_keys;
+    //     };
+
+    // auto collect_neighboring_tets_by_tet = [&](TetId tid){
+    //     std::vector<uint64_t> neig_tet_keys;
+    //     grid.foreach_edge_in_tet(tid, [&](mtet::EdgeId eid, mtet::VertexId v0, mtet::VertexId v1) {
+    //         auto cur_neig_tets = collect_neighboring_tets_by_edge(eid); 
+    //         for(auto cur_key : cur_neig_tets)
+    //         {
+    //             // if(activeColMap.find(cur_key) != activeColMap.end())
+    //             neig_tet_keys.push_back(cur_key);
+    //         }                             
+    //     });
+    //     return neig_tet_keys;
+    // };
+    // grid.seq_foreach_tet([&](TetId tid, [[maybe_unused]] std::span<const VertexId, 4> data) {
+    //     std::span<VertexId, 4> vs = grid.get_tet(tid);
+    //     auto tetKey = getTetKeyByVidsIO(vs);
+    //     auto it = markTetMap.find(tetKey);
+    //     if(it != markTetMap.end())
+    //     {
+    //         marked_tet_keys.insert(tetKey);
+    //         if(mark_one_ring_tets)
+    //         {
+    //             auto neighbor_tet_keys = collect_neighboring_tets_by_tet(tid);
+    //             for(auto key : neighbor_tet_keys)
+    //             {
+    //                 marked_tet_keys.insert(key);
+    //             }
+    //         } 
+    //     }
+    // });
     grid.seq_foreach_tet([&](TetId tid, [[maybe_unused]] std::span<const VertexId, 4> data) {
         std::span<VertexId, 4> vs = grid.get_tet(tid);
         simps.emplace_back(static_cast<size_t>(ind4DMap[value_of(vs[0])]));
@@ -121,6 +236,22 @@ void convert_4d_grid_mtetcol(
         if(it != activeColMap.end()) active_tet_count ++;
         int tetActiveVal = (it != activeColMap.end()) ? it->second : 0;
         tetActiveTags.push_back(tetActiveVal); 
+
+        auto it2 = marked_tet_keys.find(tetKey);
+        int tetMarkVal =  0;
+        if(it2 != marked_tet_keys.end())
+        {
+            mark_tet_count ++;
+            tetMarkVal = 1;
+        }
+        tetMarkTags.push_back(tetMarkVal);
+        std::vector<size_t> active4DtetIds = {};
+        if(markTetActive4DtetIdsMap.find(tetKey) != markTetActive4DtetIdsMap.end())
+        {
+            active4DtetIds = markTetActive4DtetIdsMap[tetKey];
+        }
+        tetMarkActive4DtetIds.push_back(active4DtetIds);
+        
         tet4d_num += vertexMap[value_of(vs[0])].vert4dList.size();
         tet4d_num += vertexMap[value_of(vs[1])].vert4dList.size();
         tet4d_num += vertexMap[value_of(vs[2])].vert4dList.size();
@@ -146,6 +277,84 @@ void convert_4d_grid_mtetcol(
     sweep::logger().info("3D grid tet Number: {} 3D active Tet Number: {}", grid.get_num_tets(), active_tet_count);
 
     sweep::logger().info("4D Vertex Number: {} 4D Tetrahedra Number: {}", vert4d_num, tet4d_num);
+}
+
+
+void convert_4d_grid_mtetcol(
+    mtet::MTetMesh& grid,
+    vertExtrude& vertexMap,
+    std::vector<double>& verts4d,       // flat: x,y,z,t per vertex
+    std::vector<size_t>& tets4d        // flat: 5 indices per 4D tet (pentatope))
+    )
+{
+    using namespace mtet;
+
+    // --- Phase 1: Build global 4D vertex list ---
+    using IndexMap = ankerl::unordered_dense::map<uint64_t, size_t>;
+    IndexMap base3dMap;
+
+    std::vector<size_t> vertStart;
+    vertStart.reserve(grid.get_num_vertices());
+
+    size_t vert4d_num = 0;
+
+    grid.seq_foreach_vertex([&](VertexId vid, std::span<const Scalar, 3> data) {
+        base3dMap[value_of(vid)] = base3dMap.size();
+
+        const auto& vert4dList = vertexMap[value_of(vid)].vert4dList;
+        vertStart.push_back(vert4d_num);
+
+        for (size_t i = 0; i < vert4dList.size(); i++) {
+            const Eigen::RowVector4d& coord = vert4dList[i].coord;
+            verts4d.push_back(coord(0));
+            verts4d.push_back(coord(1));
+            verts4d.push_back(coord(2));
+            verts4d.push_back(coord(3));
+        }
+
+        vert4d_num += vert4dList.size();
+    });
+
+    // --- Phase 2: For each 3D tet, sample the column and emit 4D tets ---
+    size_t tet4d_num = 0;
+    size_t active_tet_count = 0;
+
+    grid.seq_foreach_tet([&](TetId tid, [[maybe_unused]] std::span<const VertexId, 4> data) {
+        std::span<VertexId, 4> vs = grid.get_tet(tid);
+
+        auto tetKey = getTetKeyByVidsIO(vs);
+        simpCol::cell5_list cell5Col;
+        sampleCol(vs, vertexMap, cell5Col);
+        const std::array<size_t, 4> voff = {
+            vertStart[base3dMap[value_of(vs[0])]],
+            vertStart[base3dMap[value_of(vs[1])]],
+            vertStart[base3dMap[value_of(vs[2])]],
+            vertStart[base3dMap[value_of(vs[3])]]};
+
+        for (const auto& c5 : cell5Col) {
+            const int* idx = c5.hash.data();
+            int tag = idx[4];
+            // 5 vertices of the pentatope (from bind_cell5_verts logic):
+            //   [0] = advancing vertex, current time sample
+            //   [1..3] = held vertices (the other 3 base verts)
+            //   [4] = advancing vertex, previous time sample
+            std::array<size_t, 5> gid;
+            gid[0] = voff[tag] + idx[tag];
+            size_t slot = 1;
+            for (int b = 0; b < 4; b++) {
+                if (b != tag)
+                    gid[slot++] = voff[b] + idx[b];
+            }
+            gid[4] = voff[tag] + idx[tag] - 1;
+
+            for (int v = 0; v < 5; v++)
+                tets4d.push_back(gid[v]);
+            tet4d_num++;
+        }
+    });
+    // --- Logging ---
+    sweep::logger().info("3D grid tet Number: {} 3D active: {}", grid.get_num_tets(), active_tet_count);
+    sweep::logger().info("4D Vertices: {} 4D Tets: {}", vert4d_num, tet4d_num);
 }
 
 
@@ -522,4 +731,209 @@ void writeGridToJson(
     file.close();
 
     std::cout << "Written to " << filename << std::endl;
+}
+
+
+void write_tets_to_ply(
+    const std::vector<double>& verts,
+    const std::vector<size_t>& simps,
+    const std::string& filepath)
+{
+    assert(verts.size() % 3 == 0);
+    assert(simps.size() % 4 == 0);
+
+    const size_t num_verts = verts.size() / 3;
+    const size_t num_tets  = simps.size() / 4;
+    const size_t num_faces = num_tets * 4;
+
+    std::ofstream ply(filepath, std::ios::out);
+    if (!ply.is_open())
+        throw std::runtime_error("Cannot open PLY file for writing: " + filepath);
+
+    // ── Header ──────────────────────────────────────────────────────────────
+    ply << "ply\n"
+        << "format ascii 1.0\n"
+        << "comment tet mesh\n"
+        << "element vertex " << num_verts << "\n"
+        << "property double x\n"
+        << "property double y\n"
+        << "property double z\n"
+        << "element face " << num_faces << "\n"
+        << "property list uchar int vertex_indices\n"
+        << "end_header\n";
+
+    // ── Vertices ─────────────────────────────────────────────────────────────
+    ply << std::fixed << std::setprecision(10);
+    for (size_t i = 0; i < num_verts; ++i)
+        ply << verts[3*i] << ' ' << verts[3*i+1] << ' ' << verts[3*i+2] << '\n';
+
+    // ── Faces (4 triangles per tet) ─────────────────────────────────────────
+    for (size_t i = 0; i < num_tets; ++i)
+    {
+        size_t v0 = simps[4*i];
+        size_t v1 = simps[4*i+1];
+        size_t v2 = simps[4*i+2];
+        size_t v3 = simps[4*i+3];
+
+        ply << "3 " << v0 << ' ' << v1 << ' ' << v2 << '\n';
+        ply << "3 " << v0 << ' ' << v1 << ' ' << v3 << '\n';
+        ply << "3 " << v0 << ' ' << v2 << ' ' << v3 << '\n';
+        ply << "3 " << v1 << ' ' << v2 << ' ' << v3 << '\n';
+    }
+}
+
+void save_4d_mesh_binary(
+    const std::vector<double>& verts4d,
+    const std::vector<size_t>& tets4d,
+    const std::string& filepath)
+{
+    std::ofstream out(filepath, std::ios::binary);
+
+    const size_t num_verts = verts4d.size() / 4;
+    const size_t num_tets  = tets4d.size() / 5;
+
+    // Header: vertex count, tet count
+    out.write(reinterpret_cast<const char*>(&num_verts), sizeof(size_t));
+    out.write(reinterpret_cast<const char*>(&num_tets),  sizeof(size_t));
+
+    // Vertex data: num_verts * 4 doubles
+    out.write(reinterpret_cast<const char*>(verts4d.data()),
+              verts4d.size() * sizeof(double));
+
+    // Tet data: num_tets * 5 size_t
+    out.write(reinterpret_cast<const char*>(tets4d.data()),
+              tets4d.size() * sizeof(size_t));
+
+    out.close();
+}
+
+void load_4d_mesh_binary(
+    std::vector<double>& verts4d,
+    std::vector<size_t>& tets4d,
+    const std::string& filepath)
+{
+    std::ifstream in(filepath, std::ios::binary);
+
+    size_t num_verts, num_tets;
+    in.read(reinterpret_cast<char*>(&num_verts), sizeof(size_t));
+    in.read(reinterpret_cast<char*>(&num_tets),  sizeof(size_t));
+
+    verts4d.resize(num_verts * 4);
+    tets4d.resize(num_tets * 5);
+
+    in.read(reinterpret_cast<char*>(verts4d.data()),
+            verts4d.size() * sizeof(double));
+    in.read(reinterpret_cast<char*>(tets4d.data()),
+            tets4d.size() * sizeof(size_t));
+
+    in.close();
+}
+
+void save_column_mesh_binary(
+    const std::vector<double>&              verts,
+    const std::vector<size_t>&              simps,
+    const std::vector<std::vector<double>>& time,
+    const std::vector<int>&                 tetMarkTags,
+    const std::vector<std::vector<size_t>>& tetActive4DtetIds,
+    const std::string&                      filepath)
+{
+    std::ofstream out(filepath, std::ios::binary);
+
+    const size_t num_verts = verts.size() / 3;
+    const size_t num_tets  = simps.size() / 4;
+
+    out.write(reinterpret_cast<const char*>(&num_verts), sizeof(size_t));
+    // out.write(reinterpret_cast<const char*>(&num_tets),  sizeof(size_t));
+
+    out.write(reinterpret_cast<const char*>(verts.data()),
+              verts.size() * sizeof(double));
+
+    // out.write(reinterpret_cast<const char*>(simps.data()),
+    //           simps.size() * sizeof(size_t));
+
+    for (size_t i = 0; i < num_verts; ++i) {
+        size_t len = time[i].size();
+        out.write(reinterpret_cast<const char*>(&len), sizeof(size_t));
+        out.write(reinterpret_cast<const char*>(time[i].data()),
+                  len * sizeof(double));
+    }
+
+    std::vector<size_t> marked_tets;
+    std::vector<size_t> unmarked_tets;
+    std::vector<std::vector<size_t>> markTetActive4DtetIds;
+
+    for (size_t i = 0; i < simps.size()/4; ++i) {
+        if (tetMarkTags[i] == 1)
+        {
+            marked_tets.push_back(simps[4*i]);
+            marked_tets.push_back(simps[4*i + 1]);
+            marked_tets.push_back(simps[4*i + 2]);
+            marked_tets.push_back(simps[4*i + 3]);
+            markTetActive4DtetIds.push_back(tetActive4DtetIds[i]);
+        } else {
+            unmarked_tets.push_back(simps[4*i]);
+            unmarked_tets.push_back(simps[4*i + 1]);
+            unmarked_tets.push_back(simps[4*i + 2]);
+            unmarked_tets.push_back(simps[4*i + 3]);
+
+        }
+    }
+
+    size_t num_marked   = marked_tets.size();
+    size_t num_unmarked = unmarked_tets.size();
+    std::cout << " marked tet num " << num_marked << std::endl;
+    out.write(reinterpret_cast<const char*>(&num_marked),   sizeof(size_t));
+    out.write(reinterpret_cast<const char*>(marked_tets.data()),
+              num_marked * sizeof(size_t));
+    out.write(reinterpret_cast<const char*>(&num_unmarked), sizeof(size_t));
+    out.write(reinterpret_cast<const char*>(unmarked_tets.data()),
+              num_unmarked * sizeof(size_t));
+
+    for (size_t i = 0; i < markTetActive4DtetIds.size(); ++i) {
+        size_t len = markTetActive4DtetIds[i].size();
+        out.write(reinterpret_cast<const char*>(&len), sizeof(size_t));
+        out.write(reinterpret_cast<const char*>(markTetActive4DtetIds[i].data()),
+                  len * sizeof(size_t));
+    }
+
+    out.close();
+}
+void load_column_mesh_binary(
+    std::vector<double>&              verts,
+    std::vector<std::vector<double>>& time,
+    std::vector<size_t>&              marked_tets,
+    std::vector<size_t>&              unmarked_tets,
+    const std::string&                filepath)
+{
+    std::ifstream in(filepath, std::ios::binary);
+
+    size_t num_verts;
+    in.read(reinterpret_cast<char*>(&num_verts), sizeof(size_t));
+
+    verts.resize(num_verts * 3);
+    in.read(reinterpret_cast<char*>(verts.data()),
+            verts.size() * sizeof(double));
+
+    time.resize(num_verts);
+    for (size_t i = 0; i < num_verts; ++i) {
+        size_t len;
+        in.read(reinterpret_cast<char*>(&len), sizeof(size_t));
+        time[i].resize(len);
+        in.read(reinterpret_cast<char*>(time[i].data()),
+                len * sizeof(double));
+    }
+
+    size_t num_marked;
+    in.read(reinterpret_cast<char*>(&num_marked), sizeof(size_t));
+    marked_tets.resize(num_marked);
+    in.read(reinterpret_cast<char*>(marked_tets.data()),
+            num_marked * sizeof(size_t));
+
+    size_t num_unmarked;
+    in.read(reinterpret_cast<char*>(&num_unmarked), sizeof(size_t));
+    unmarked_tets.resize(num_unmarked);
+    in.read(reinterpret_cast<char*>(unmarked_tets.data()),
+            num_unmarked * sizeof(size_t));
+
+    in.close();
 }

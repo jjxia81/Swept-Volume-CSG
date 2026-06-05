@@ -152,7 +152,7 @@ bool refineFtCSGSingle(
     if(isInside(bezierVals))
     {
         inside = true;
-        return false;
+        // return false;
     }
 
     if(bezierVals.maxCoeff() * bezierVals.minCoeff() > 0)
@@ -224,6 +224,46 @@ bool refineFtCSGSingle(
 //     this->gradNorm = gradList.norm();
 // }
 
+bool isEfDiffFtSmall(
+    const std::array<vertex4d*, 5>& verts,
+    const std::vector<size_t>& domFids,
+    const double threshold)
+{
+    const auto& g1s = verts[0]->grads;
+    const auto& g2s = verts[1]->grads;
+    const auto& g3s = verts[2]->grads;
+    const auto& g4s = verts[3]->grads;
+    const auto& g5s = verts[4]->grads;
+    if(domFids.size() == 2)
+    {
+        auto domF1 = domFids[0]; 
+        auto domF2 = domFids[1];
+        auto g1 = (g1s.row(domF1) -  g1s.row(domF2)).normalized();
+        auto g2 = (g2s.row(domF1) -  g2s.row(domF2)).normalized();
+        auto g3 = (g3s.row(domF1) -  g3s.row(domF2)).normalized();
+        auto g4 = (g4s.row(domF1) -  g4s.row(domF2)).normalized();
+        auto g5 = (g5s.row(domF1) -  g5s.row(domF2)).normalized();
+
+        if(abs(g1(3)) < threshold || abs(g2(3)) < threshold || abs(g3(3)) < threshold 
+                                || abs(g4(3)) < threshold || abs(g5(3)) < threshold)
+        return true;
+    } else {
+        auto domF1 = domFids[0]; 
+        auto g1 = (g1s.row(domF1) ).normalized();
+        auto g2 = (g2s.row(domF1) ).normalized();
+        auto g3 = (g3s.row(domF1) ).normalized();
+        auto g4 = (g4s.row(domF1) ).normalized();
+        auto g5 = (g5s.row(domF1) ).normalized();
+
+        if(abs(g1(3)) < threshold || abs(g2(3)) < threshold || abs(g3(3)) < threshold 
+                                || abs(g4(3)) < threshold || abs(g5(3)) < threshold)
+        return true;
+    }
+    
+
+    return false;
+
+}
 
 
 /// See header
@@ -339,6 +379,7 @@ bool refineEqualSurfaceCSG(
     bool& choice,
     bool& eqaulSurf0X,
     double& max_error,
+    bool& efFt0x,
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount)
 {
@@ -362,12 +403,22 @@ bool refineEqualSurfaceCSG(
     nPoints_eigen_shared << equalSurfBezier, bezier_f2;
     if(outHullClip2D(nPoints_eigen_shared)) return false;
 
+    // auto ft_diff = (bezier_ft1 - bezier_ft2).cwiseAbs(); 
+    // if(ft_diff.minCoeff() < 1.5) efFt0x = true;
+
+    efFt0x = true;
+
+    // auto equalSurfBezierSum =  bezier_f1 + bezier_f2;
+    // if(equalSurfBezier.maxCoeff() * equalSurfBezier.minCoeff() < 0) efFt0x = true;
+    
     const auto& bezier_ft1 = bezierFtVals.row(equalSurfFuncIds.first);
     const auto& bezier_ft2 = bezierFtVals.row(equalSurfFuncIds.second);
+
     Eigen::RowVector<double, 35> ftSigns = bezier_ft1.cwiseProduct(bezier_ft2);
     if(ftSigns.minCoeff() > 0) return false;
-
     eqaulSurf0X = true;
+    //  efFt0x = true;
+    
     // if(! refineGeoData.hasInit) refineGeoData.init();
     auto vec1 = p2 - p1, vec2 = p3 - p1, vec3 = p4 - p1, vec4 = p5 - p1;
     Eigen::Matrix4d vec;

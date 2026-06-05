@@ -10,8 +10,10 @@
 #include <cell_complex/CellComplex.h>
 #include <cell_complex/dominance.h>
 #include <cell_complex/generators.h>
+#include <cell_complex/simplicial_hybrid.h>
 #include <cell_complex/algorithm/silhouette.h>
 #include <cell_complex/algorithm/envelope.h>
+
 
 #include <array>
 #include <chrono>
@@ -102,7 +104,9 @@ std::tuple<
     std::vector<Scalar>,
     std::vector<size_t>,
     std::vector<std::vector<Scalar>>,
-    std::vector<std::vector<Scalar>>>
+    std::vector<int>,
+    std::vector<int>,
+    std::vector<std::vector<size_t>> >
 refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs, 
     CSGFunction csg_f,
     mtet::MTetMesh& voidgrid, 
@@ -118,6 +122,8 @@ refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs,
     vertExtrude vertexMap;
     insidenessMap insideMap;
     std::unordered_map<uint64_t, int> tetActiveMap;
+    std::unordered_map<uint64_t, int> tetMarkMap; 
+    std::unordered_map<uint64_t, std::vector<size_t>> markTetActive4DtetIdsMap;
 
     // TODO: Clarify the purpose of these timers and whether they're still
     // needed.
@@ -140,6 +146,8 @@ refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs,
             profileTimer,
             profileCount,
             tetActiveMap,
+            tetMarkMap,
+            markTetActive4DtetIdsMap,
             options.initial_time_samples,
             options.min_tet_radius_ratio,
             options.min_tet_edge_length,
@@ -166,20 +174,29 @@ refine_grid_csg(const std::vector<SpaceTimeFunction>& csg_funcs,
     std::vector<mtetcol::Scalar> verts;
     std::vector<size_t> simps;
     std::vector<int> tetActiveTags;
+    std::vector<int> tetMarkTags;
     std::vector<std::vector<double>> time;
     std::vector<std::vector<double>> values;
+    std::vector<std::vector<size_t>> tetMarkActive4DtetIds;
 
-    convert_4d_grid_mtetcol(grid, vertexMap, tetActiveMap, verts, simps, tetActiveTags, time, values, options.out_dir, cyclic);
+    convert_4d_grid_mtetcol(grid, vertexMap, tetActiveMap, tetMarkMap, markTetActive4DtetIdsMap,
+        verts, simps, tetActiveTags, tetMarkTags, tetMarkActive4DtetIds, time, options.out_dir, cyclic);
+
+
+    // std::vector<double> verts4d;       
+    // std::vector<size_t> tets4d;       
+    // convert_4d_grid_mtetcol(grid, vertexMap, verts4d, tets4d);
+
+    // std::string outpath = options.out_dir +  "/4dtet_mesh.bin"; 
+    // save_4d_mesh_binary(verts4d, tets4d, outpath);
 
     // std::string outgrid_json_path = options.out_dir +  "/output_grid.json"; 
     // writeGridToJson(outgrid_json_path, verts, simps, tetActiveTags, time);
 
     // std::string outpath = options.out_dir +  "/output_grid.m"; 
     // export_to_mathematica(outpath, verts, simps, tetActiveTags, time); 
-    
-
     // cell_complex::from_simplicial_columns<4>(verts, simps, timeSamples, timeStartIndices);
-    return {verts, simps, time, values};
+    return {verts, simps, time, tetActiveTags, tetMarkTags, tetMarkActive4DtetIds};
 }
 
 std::tuple<
@@ -465,13 +482,51 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     std::vector<size_t> simps;
     std::vector<std::vector<double>> time;
     std::vector<std::vector<double>> values;
+    std::vector<int>     tetActiveTags;
+    std::vector<int>     tetMarkTags;
+    std::vector<size_t>  active_simps;
+    std::vector<size_t>  mark_simps;
+    std::vector<size_t>  unmark_simps;
+    std::vector<std::vector<size_t>> tetMarkActive4DtetIds;
+    std::vector<std::vector<size_t>> marktetMarkActive4DtetIds;
 
     if (options.with_adaptive_refinement) {
         if(options.with_csg_funcs)
         {
             auto refine_start = std::chrono::high_resolution_clock::now();
-            std::tie(verts, simps, time, values) = refine_grid_csg(funcs, csg_f, grid, options);
+            std::tie(verts, simps, time, tetActiveTags, tetMarkTags, tetMarkActive4DtetIds) 
+                = refine_grid_csg(funcs, csg_f, grid, options);
+            for (size_t i = 0; i < simps.size()/4; ++i) {
+                if (tetActiveTags[i] == 1)
+                {
+                    active_simps.push_back(simps[4*i]);
+                    active_simps.push_back(simps[4*i + 1]);
+                    active_simps.push_back(simps[4*i + 2]);
+                    active_simps.push_back(simps[4*i + 3]);
+                } 
+                if (tetMarkTags[i] == 1)
+                {
+                    mark_simps.push_back(simps[4*i]);
+                    mark_simps.push_back(simps[4*i + 1]);
+                    mark_simps.push_back(simps[4*i + 2]);
+                    mark_simps.push_back(simps[4*i + 3]);
+                    marktetMarkActive4DtetIds.push_back(tetMarkActive4DtetIds[i]);
+                } else {
+                    unmark_simps.push_back(simps[4*i]);
+                    unmark_simps.push_back(simps[4*i + 1]);
+                    unmark_simps.push_back(simps[4*i + 2]);
+                    unmark_simps.push_back(simps[4*i + 3]);
+                }
+            }
+            // simps = active_simps;
+            std::string mark_tets_dir = options.out_dir + "/marked_tets.bin";
+            save_column_mesh_binary(verts,simps, time, tetMarkTags, tetMarkActive4DtetIds, mark_tets_dir);
+            std::string tet_dir = options.out_dir + "/active_tets.ply";
+            write_tets_to_ply(verts, active_simps, tet_dir);
+            std::string mark_tet_dir = options.out_dir + "/marked_tets.ply";
+            write_tets_to_ply(verts, mark_simps, mark_tet_dir);
             auto refine_end = std::chrono::high_resolution_clock::now();
+            logger().info("mark tet num : {}", mark_simps.size()/4);
             logger().info(
                 "Grid refinement time: {} seconds",
                 std::chrono::duration<double>(refine_end - refine_start).count());
@@ -513,24 +568,47 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
         timeStartIndices.push_back(timeEndIndex);
     }
 
+    std::vector<size_t> active_pent_start_indices;
+    active_pent_start_indices.push_back(0);
+    std::vector<size_t> active_pent_indices;
+    size_t tetEndIndex = 0;
+    for(size_t i = 0; i < marktetMarkActive4DtetIds.size(); ++i)
+    {
+        for(auto id : marktetMarkActive4DtetIds[i])
+        {
+            active_pent_indices.push_back(id);
+        }
+        tetEndIndex += marktetMarkActive4DtetIds[i].size();
+        active_pent_start_indices.push_back(tetEndIndex);
+    }
+
     bool use_config_file = false;
     cell_complex::CellComplex<4> ccSelect;
     if(!use_config_file)
     {
-        ccSelect = cell_complex::from_simplicial_columns<4>(verts, simps, timeSamples, timeStartIndices);
+        cell_complex::SimplicialColumnsOptions cc_options;
+        // cc_options.pent_column_mode  = cell_complex::PentColumnMode::ActiveConnectedComponents;
+        cc_options.pent_column_mode  = cell_complex::PentColumnMode::ActiveSeparators;
+        // ccSelect = cell_complex::from_simplicial_columns<4>(verts, simps, timeSamples, timeStartIndices);
+        ccSelect =  cell_complex::from_columns_and_pentachora(
+        verts, unmark_simps, timeSamples, timeStartIndices, mark_simps,
+        cc_options, active_pent_start_indices, active_pent_indices);
         logger().info("Successfully generated column grid");
         verts.clear(); simps.clear();timeSamples.clear();
-        timeStartIndices.clear(); time.clear();        
+        
+        mark_simps.clear();
+        unmark_simps.clear();
+        timeStartIndices.clear(); time.clear();       
         // auto &ccSelect = cellFromGrid;
     } else {
         std::string grid_config_path = "/home/jjxia/Documents/projects/Swept-Volume-CSG/data/csg/config_test.yaml";
         ccSelect = cell_complex::load_uniform_grid<4>(grid_config_path);
         logger().info("cell complex successfully generated from config file");
-       
     }
     
     cell_complex::algorithm::SilhouetteComplexOptions cell_options;
     cell_options.max_temporal_edge_length = 0.01; // Adjust as needed
+    // cell_options.cut_time_derivative_difference = true;
     // ccSelect.refine_long_edges(0.002);
     cell_complex::algorithm::compute_silhouette_complex(ccSelect, *csgTreePtr, cell_options);
     // cell_complex::save_obj(options.out_dir + "/silhouette.obj", ccSelect);
@@ -543,7 +621,7 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
 
     // cell_complex::algorithm::EnvelopeComplexOptions envelope_options;
     // envelope_options.use_snapping = options.with_snapping;
-    bool use_halley_methtod = true;
+    bool use_halley_methtod = false;
     cell_complex::algorithm::compute_envelope_complex(ccSelect, *csgTreePtr, use_halley_methtod);
     
     auto sf_end = std::chrono::high_resolution_clock::now();

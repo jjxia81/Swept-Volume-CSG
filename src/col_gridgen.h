@@ -64,6 +64,7 @@ bool gridRefineCSG(
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount,
     std::unordered_map<uint64_t, int>& colActiveMap,
+    std::unordered_map<uint64_t, int>& tetMarkMap,
     size_t initial_time_samples,
     const double min_tet_radius_ratio,
     const double min_tet_edge_length,
@@ -82,6 +83,8 @@ bool gridRefineCSGParallel(
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount,
     std::unordered_map<uint64_t, int>& colActiveMap,
+    std::unordered_map<uint64_t, int>& tetMarkMap,
+    std::unordered_map<uint64_t, std::vector<size_t>>& markTetActive4DtetIdsMap,
     size_t initial_time_samples,
     const double min_tet_radius_ratio,
     const double min_tet_edge_length,
@@ -110,6 +113,11 @@ void sampleCol(
     const std::span<mtet::VertexId, 4>& vs,
     vertExtrude& vertexMap,
     simpCol::cell5_list& cell5Col);
+
+void sampleColSeparator(const std::span<mtet::VertexId, 4>& vs,
+    vertExtrude& vertexMap,
+    simpCol::cell5_list& cell5Col,
+    simpCol::cell4_separator_list& separators);
 
 void parse_vertices(
     const mtetcol::Contour<4>& contour,
@@ -140,8 +148,7 @@ void init5CGridCSG(
     vertExtrude& vertexMap);
 
 mtet::Scalar calTimeGlobalScaleWithInitGridCSG(vertExtrude& vertexMap);
-
 mtet::Scalar calTimeGlobalScaleWithInitGrid(vertExtrude& vertexMap);
 
-
 uint64_t getTetKeyByVids(const std::span<VertexId, 4>& vs);
+

@@ -32,6 +32,11 @@ struct RefineTetGeoData{
 };
 
 
+bool isEfDiffFtSmall(
+    const std::array<vertex4d*, 5>& verts,
+    const std::vector<size_t>& domFids,
+    const double threshold);
+
 /// 4D (un-projected) distance check for the time derivative function for a given 4D 5-cell. The default threshold here is 0.01, and it will not change with user's input
 /// @param[in] verts         An array of 5 4D vertices. This vertex4d data structure also stores this vertex value and gradient.
 /// @param[in] threshold            Threshold for the maxmimum allowed distance error for this 5-cell not to be subdivided.
@@ -91,6 +96,7 @@ bool refineEqualSurfaceCSG(
     bool& choice,
     bool& eqaulSurf0X,
     double& max_error,
+    bool& efFt0x,
     std::array<double, timer_amount>& profileTimer,
     std::array<size_t, timer_amount>& profileCount);
 

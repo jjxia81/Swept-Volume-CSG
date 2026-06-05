@@ -132,7 +132,8 @@ struct SweepOptions {
     /// The minimum acceptable tetrahedron radius ratio during grid refinement.
     ///
     /// Tets with in-radius to circum-radius ratio below this threshold will not be refined further.
-    Scalar min_tet_radius_ratio = 1e-5;
+    // Scalar min_tet_radius_ratio = 1e-5;
+    Scalar min_tet_radius_ratio = 1e-2;
 
     /// Minimum acceptable tetrahedron edge length during grid refinement.
     ///

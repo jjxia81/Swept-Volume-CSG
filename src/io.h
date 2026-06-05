@@ -40,11 +40,14 @@ void convert_4d_grid_mtetcol(
     mtet::MTetMesh grid,
     vertExtrude vertexMap,
     std::unordered_map<uint64_t, int>& activeColMap,
+    std::unordered_map<uint64_t, int>& markTetMap,
+    std::unordered_map<uint64_t, std::vector<size_t>>& markTetActive4DtetIdsMap,
     std::vector<double>& verts,
     std::vector<size_t>& simps,
     std::vector<int>& tetActiveTags,
+    std::vector<int>& tetMarkTags,
+    std::vector<std::vector<size_t>>& tetMarkActive4DtetIds,
     std::vector<std::vector<double>>& time,
-    std::vector<std::vector<double>>& values,
     const std::string& out_dir,
     bool cyclic);
 
@@ -78,5 +81,43 @@ void writeGridToJson(
     const std::vector<size_t>& simps,
     const std::vector<int>& activeTags,
     const std::vector<std::vector<double>>& time); 
+
+void write_tets_to_ply(
+    const std::vector<double>& verts,
+    const std::vector<size_t>& simps,
+    const std::string& filepath);
+
+void convert_4d_grid_mtetcol(
+    mtet::MTetMesh& grid,
+    vertExtrude& vertexMap,
+    std::vector<double>& verts4d,       // flat: x,y,z,t per vertex
+    std::vector<size_t>& tets4d        // flat: 5 indices per 4D tet (pentatope))
+    );
+
+void save_4d_mesh_binary(
+    const std::vector<double>& verts4d,
+    const std::vector<size_t>& tets4d,
+    const std::string& filepath);
+
+void load_4d_mesh_binary(
+    std::vector<double>& verts4d,
+    std::vector<size_t>& tets4d,
+    const std::string& filepath);
+
+void save_column_mesh_binary(
+    const std::vector<double>&              verts,
+    const std::vector<size_t>&              simps,
+    const std::vector<std::vector<double>>& time,
+    const std::vector<int>&                 tetMarkTags,
+    const std::vector<std::vector<size_t>>& tetActive4DtetIds,
+    const std::string&                      filepath);
+
+void load_column_mesh_binary(
+    std::vector<double>&              verts,
+    std::vector<size_t>&              simps,
+    std::vector<std::vector<double>>& time,
+    std::vector<size_t>&              marked_tets,
+    std::vector<size_t>&              unmarked_tets,
+    const std::string&                filepath);
 
 #endif /* io_h */

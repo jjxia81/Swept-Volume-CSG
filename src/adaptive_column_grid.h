@@ -260,6 +260,8 @@ class simpCol
 {
 public:
     using cell5_list = llvm_vecsmall::SmallVector<cell5, 256>;
+    using cell4_separator = std::array<int, 4>;
+    using cell4_separator_list = std::vector<cell4_separator>;
     cell5_list cell5Col;
     bool covered = false;
     simpCol() = default;

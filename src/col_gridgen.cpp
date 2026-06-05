@@ -88,73 +88,95 @@ void sampleCol(
             break;
         }
     }
-    //    Eigen::Matrix<double, 30, Eigen::Dynamic> GCol(30, cell5Col.size());
-    //    //GCol.resize(30, cell5Col.size());
-    ////    std::array<vertex4d*, 5> verts{};
-    //    for (size_t i = 0; i < 4; i++){
-    //        baseVerts[i] = &vertexMap[value_of(vs[i])];
-    //    }
-    ////    dr::parallel_for(
-    //    //                     dr::blocked_range<size_t>(0, cell5Col.size(), cell5Col.size() / 12),
-    //    //                     [&](dr::blocked_range<size_t> range) {
-    //    //                         for (const auto& cell5It : range){
-    //    for (size_t cell5It = 0; cell5It < cell5Col.size(); cell5It++){
-    //        const auto& simp = cell5Col[cell5It];
-    //        std::array<int, 5> cell5Index = simp.hash;
-    //        int lastInd = cell5Index[4];
-    //        //std::array<vertex4d, 5> verts;
-    //        auto& verts = verts_list[cell5It];
-    //        verts[0] = &baseVerts[lastInd]->vert4dList[cell5Index[lastInd]];
-    //        size_t ind = 0;
-    //        for (size_t i = 0; i < 4; i++){
-    //            if (i != lastInd){
-    //                ind ++;
-    //                verts[ind] = &baseVerts[i]->vert4dList[cell5Index[i]];
-    //            }
-    //        }
-    //        verts[4] = &baseVerts[lastInd]->vert4dList[cell5Index[lastInd] - 1];
-    //        const auto& p1 = verts[0]->coord;
-    //        const auto& p2 = verts[1]->coord;
-    //        const auto& p3 = verts[2]->coord;
-    //        const auto& p4 = verts[3]->coord;
-    //        const auto& p5 = verts[4]->coord;
-    //
-    //        const auto& v1 = verts[0]->valGradList.first;
-    //        const auto& v2 = verts[1]->valGradList.first;
-    //        const auto& v3 = verts[2]->valGradList.first;
-    //        const auto& v4 = verts[3]->valGradList.first;
-    //        const auto& v5 = verts[4]->valGradList.first;
-    //
-    //        const auto& g1 = verts[0]->valGradList.second;
-    //        const auto& g2 = verts[1]->valGradList.second;
-    //        const auto& g3 = verts[2]->valGradList.second;
-    //        const auto& g4 = verts[3]->valGradList.second;
-    //        const auto& g5 = verts[4]->valGradList.second;
-    //        //        using M5x4R = Eigen::Matrix<double,5,4,Eigen::RowMajor>;
-    //        //        using V25   = Eigen::Matrix<double,25,1>;
-    //        //
-    //        //        // build Pmat / Gmat (one copy per row, cheap and readable)
-    //        //        M5x4R Pmat;  Pmat << p1, p2, p3, p4, p5;
-    //        //        M5x4R Gmat;  Gmat << g1, g2, g3, g4, g5;
-    //        //
-    //        //        // 25 dot-products in one GEMM
-    //        //        Eigen::Matrix<double,5,5,Eigen::RowMajor> D = Gmat * Pmat.transpose();
-    //        //
-    //        //        // assemble 30-entry vector  (5 values + 25 dot-products)
-    //        //Eigen::Matrix<double,30,1> G;
-    //        GCol.col(cell5It) << v1, v2, v3, v4, v5, g1.dot(p1), g1.dot(p2), g1.dot(p3),
-    //        g1.dot(p4), g1.dot(p5), g2.dot(p1), g2.dot(p2), g2.dot(p3), g2.dot(p4), g2.dot(p5),
-    //        g3.dot(p1), g3.dot(p2), g3.dot(p3), g3.dot(p4), g3.dot(p5), g4.dot(p1), g4.dot(p2),
-    //        g4.dot(p3), g4.dot(p4), g4.dot(p5), g5.dot(p1), g5.dot(p2), g5.dot(p3), g5.dot(p4),
-    //        g5.dot(p5);
-    ////        GCol.col(cell5It) = G;// copy 25 doubles
-    //        //GCol << G;// copy 25 doubles
-    //    }
-    //    //                     });
-    //    Eigen::Matrix<double,35,Eigen::Dynamic> result = (BEZIER_M2 * GCol).eval();
-    //    //GCol = result.topRows(30);
-    ////    return cell5Col;
 }
+
+void sampleColSeparator(
+    const std::span<mtet::VertexId, 4>& vs,
+    vertExtrude& vertexMap,
+    simpCol::cell5_list& cell5Col,
+    simpCol::cell4_separator_list& separators)
+{
+    const auto& ti = vertexMap[value_of(vs[0])].vert4dList;
+    const auto& tj = vertexMap[value_of(vs[1])].vert4dList;
+    const auto& tk = vertexMap[value_of(vs[2])].vert4dList;
+    const auto& tl = vertexMap[value_of(vs[3])].vert4dList;
+
+    const std::array<uint64_t, 4> quad = {
+        value_of(vs[0]), value_of(vs[1]),
+        value_of(vs[2]), value_of(vs[3])};
+
+    size_t i = 1, j = 1, k = 1, l = 1;
+    const size_t ei = ti.size(), ej = tj.size(), ek = tk.size(), el = tl.size();
+
+    cell5Col.reserve(ei + ej + ek + el - 4);
+    separators.reserve(ei + ej + ek + el - 5);
+
+    auto push_cell = [&](uint8_t tag, size_t ii, size_t jj, size_t kk, size_t ll, int lastTime) {
+        cell5 s;
+        s.hash = {int(ii), int(jj), int(kk), int(ll), tag};
+        s.time_list = {ti[ii].time, tj[jj].time, tk[kk].time, tl[ll].time, lastTime};
+        cell5Col.emplace_back(std::move(s));
+    };
+
+    auto push_separator = [&]() {
+        const bool is_bottom = (i == 1 && j == 1 && k == 1 && l == 1);
+        const bool is_top = (i == ei && j == ej && k == ek && l == el);
+        if (is_bottom || is_top) return;
+
+        separators.push_back({
+            int(i - 1), int(j - 1), int(k - 1), int(l - 1)
+        });
+    };
+
+    while (i < ei || j < ej || k < ek || l < el) {
+        const int t0 = (i < ei) ? ti[i].time : kSentinelTime;
+        const int t1 = (j < ej) ? tj[j].time : kSentinelTime;
+        const int t2 = (k < ek) ? tk[k].time : kSentinelTime;
+        const int t3 = (l < el) ? tl[l].time : kSentinelTime;
+
+        uint8_t minIdx = 0;
+        int minTime = t0;
+        uint64_t minQuad = quad[0];
+
+        auto update_min = [&](uint8_t idx, int t, uint64_t q) {
+            if (t < minTime || (t == minTime && q < minQuad)) {
+                minIdx = idx;
+                minTime = t;
+                minQuad = q;
+            }
+        };
+
+        update_min(1, t1, quad[1]);
+        update_min(2, t2, quad[2]);
+        update_min(3, t3, quad[3]);
+
+        switch (minIdx) {
+        case 0:
+            push_cell(0, i, j - 1, k - 1, l - 1, ti[i - 1].time);
+            ++i;
+            push_separator();
+            break;
+        case 1:
+            push_cell(1, i - 1, j, k - 1, l - 1, tj[j - 1].time);
+            ++j;
+            push_separator();
+            break;
+        case 2:
+            push_cell(2, i - 1, j - 1, k, l - 1, tk[k - 1].time);
+            ++k;
+            push_separator();
+            break;
+        case 3:
+            push_cell(3, i - 1, j - 1, k - 1, l, tl[l - 1].time);
+            ++l;
+            push_separator();
+            break;
+        }
+    }
+}
+
+
+
 
 /// Re-extrusion of simplex column after the temporal edge subdivision
 /// @param[in] simpInfo:  The list of 4D simplex column

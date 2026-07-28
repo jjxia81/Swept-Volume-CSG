@@ -181,6 +181,9 @@ void load_config(std::string config_file, sweep::GridSpec& grid_spec, sweep::Swe
         if (param_config["cyclic"]) {
             options.cyclic = param_config["cyclic"].as<bool>();
         }
+        if (param_config["use_mix_cell_complex"]) {
+            options.use_mix_cc = param_config["use_mix_cell_complex"].as<bool>();
+        }
         if (param_config["volume_threshold"]) {
             options.volume_threshold = param_config["volume_threshold"].as<double>();
         }
@@ -198,6 +201,9 @@ void load_config(std::string config_file, sweep::GridSpec& grid_spec, sweep::Swe
         }
         if (param_config["min_tet_edge_length"]) {
             options.min_tet_edge_length = param_config["min_tet_edge_length"].as<double>();
+        }
+        if (param_config["min_time_edge_length"]) {
+            options.min_time_edge_length = param_config["min_time_edge_length"].as<double>();
         }
     }
 }

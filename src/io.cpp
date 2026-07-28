@@ -237,19 +237,26 @@ void convert_4d_grid_mtetcol(
         int tetActiveVal = (it != activeColMap.end()) ? it->second : 0;
         tetActiveTags.push_back(tetActiveVal); 
 
-        auto it2 = marked_tet_keys.find(tetKey);
+        // auto it2 = marked_tet_keys.find(tetKey);
         int tetMarkVal =  0;
-        if(it2 != marked_tet_keys.end())
-        {
-            mark_tet_count ++;
-            tetMarkVal = 1;
-        }
-        tetMarkTags.push_back(tetMarkVal);
+        // if(it2 != marked_tet_keys.end())
+        // {
+        //     mark_tet_count ++;
+        //     tetMarkVal = 1;
+        // }
+        
         std::vector<size_t> active4DtetIds = {};
         if(markTetActive4DtetIdsMap.find(tetKey) != markTetActive4DtetIdsMap.end())
         {
+            
             active4DtetIds = markTetActive4DtetIdsMap[tetKey];
+            if(!active4DtetIds.empty())
+            {
+                mark_tet_count ++;
+                tetMarkVal = 1;
+            }
         }
+        tetMarkTags.push_back(tetMarkVal);
         tetMarkActive4DtetIds.push_back(active4DtetIds);
         
         tet4d_num += vertexMap[value_of(vs[0])].vert4dList.size();

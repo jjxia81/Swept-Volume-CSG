@@ -15,6 +15,8 @@
 // ============================================================
 //  Types & comparators (file-scope so they're shared by all helpers)
 // ============================================================
+stf::CSGTree<3>* inputCSGTreePtr = nullptr;
+
 
 using TimeElem  = std::tuple<mtet::Scalar, mtet::TetId, mtet::VertexId, int>;
 using SpaceElem = std::tuple<mtet::Scalar, mtet::TetId, mtet::EdgeId>;
@@ -36,6 +38,39 @@ double time_start_G = 0;
 double time_end_G = 1.0;
 
 bool refine_using_openmp = false; 
+
+
+void calTreeNoLeafNodeDiffValsGrads(const std::array<double,3> pos, const double t_val, 
+                                    const size_t csg_tree_non_leaf_num,
+                                    Eigen::RowVectorXd& nodeDiffVals,
+                                    MatrixX4dRowMajor& nodeDiffGrads,
+                                    Eigen::RowVectorXi& nodeLeftLeafIds,
+                                    Eigen::RowVectorXi& nodeRightLeafIds)
+{
+    // std::array<double,3> pos = {vidCoord[0], vidCoord[1], vidCoord[2]};
+    auto trace = inputCSGTreePtr->value_gradient_trace(pos, t_val); 
+    nodeDiffVals.resize(csg_tree_non_leaf_num);
+    nodeDiffGrads.resize(csg_tree_non_leaf_num, 4);
+    nodeLeftLeafIds.resize(csg_tree_non_leaf_num);
+    nodeRightLeafIds.resize(csg_tree_non_leaf_num);
+
+    
+    size_t node_count = 0;
+    for(const auto& node : trace)
+    {
+        if(node.has_child_difference)
+        {
+            nodeDiffVals[node_count] = node.child_difference_value;
+            nodeDiffGrads.row(node_count) <<   node.child_difference_gradient[0],
+                                                    node.child_difference_gradient[1],
+                                                    node.child_difference_gradient[2],
+                                                    node.child_difference_gradient[3];
+            nodeLeftLeafIds[node_count] = node.left_leaf_id;
+            nodeRightLeafIds[node_count] = node.right_leaf_id;
+            node_count ++;
+        }
+    }
+}
 
 /// @param[in] initial_time_samples: initial number of time samples at each vertex. It will be
 /// rounded up to the next power of 2.
@@ -67,6 +102,7 @@ void init5CGridCSG(
         time3DList[i] = time;
     }
     size_t csgf_n = csg_funcs.size();
+    size_t csg_tree_non_leaf_num = inputCSGTreePtr->get_num_nodes() - csg_funcs.size();
     // std::cout << " csgf_n ----------" << csgf_n << std::endl;
     grid.seq_foreach_vertex([&](mtet::VertexId vid, std::span<const mtet::Scalar, 3> data) {
         vertexCol col;
@@ -83,6 +119,11 @@ void init5CGridCSG(
                 vert.vals[fi] = res.first;
                 vert.grads.row(fi) = res.second;
             }
+
+            std::array<double,3> pos = {data[0], data[1], data[2]};
+            calTreeNoLeafNodeDiffValsGrads(pos, time_fp, csg_tree_non_leaf_num, 
+                vert.nodeDiffVals, vert.nodeDiffGrads, vert.nodeLeftLeafIds, vert.nodeRightLeafIds);
+    
             vertColList[i] = vert;
         }
         col.vert4dList = vertColList;
@@ -380,6 +421,7 @@ static vertexCol make_new_spatial_vert(
                    std::back_inserter(tSamples));
 
     vertexCol::vert4d_list vertColList(tSamples.size());
+    size_t csg_tree_non_leaf_num = inputCSGTreePtr->get_num_nodes() - funcs.size();
     for (size_t i = 0; i < tSamples.size(); i++) {
         vertex4d vert(funcs.size());
         vert.time        = tSamples[i];
@@ -393,6 +435,9 @@ static vertexCol make_new_spatial_vert(
             vert.grads.row(dfi) = cur_val_grad.second;
         }
         vert.valGradList = {vert.vals[0], vert.grads.row(0)}; 
+        std::array<double,3> pos = {vidCoord[0], vidCoord[1], vidCoord[2]};
+        calTreeNoLeafNodeDiffValsGrads(pos, tfp, csg_tree_non_leaf_num, 
+            vert.nodeDiffVals, vert.nodeDiffGrads, vert.nodeLeftLeafIds, vert.nodeRightLeafIds);
         vertColList[i]   = vert;
     }
     vertexCol col;
@@ -1006,6 +1051,57 @@ static Scalar cell5_time_edge_value_diff(
     return curr.vals[fid] - prev.vals[fid]; 
 }
 
+static Scalar cell5_time_edge_value_diff_ef(
+    const cell5&                     simp,
+    const std::array<vertexCol*, 4>& baseVertsPtr,
+    const size_t fid_a,
+    const size_t fid_b,
+    bool is_ft = false)
+{
+    const int* idx = simp.hash.data();
+    const int extrudeLocal = idx[4];
+
+    // for(int i = 0; i < 4; ++i)
+    // {
+    //     auto vertex = baseVertsPtr[idx[i]]->vert4dList[idx[extrudeLocal]]
+    // }
+    const vertex4d& curr =
+        baseVertsPtr[extrudeLocal]->vert4dList[idx[extrudeLocal]];
+
+    const vertex4d& prev =
+        baseVertsPtr[extrudeLocal]->vert4dList[idx[extrudeLocal] - 1];
+    if(is_ft) 
+    {
+        return curr.grads.row(fid_a)(3) - prev.grads.row(fid_a)(3);
+    } 
+    return (curr.vals[fid_a] - curr.vals[fid_b]) - (prev.vals[fid_a]-prev.vals[fid_b] ); 
+}
+
+
+static Scalar cell5_time_edge_value_diff_on_tree_node(
+    const cell5&                     simp,
+    const std::array<vertexCol*, 4>& baseVertsPtr,
+    const size_t node_id, bool is_ft = false)
+{
+    const int* idx = simp.hash.data();
+    const int extrudeLocal = idx[4];
+
+    // for(int i = 0; i < 4; ++i)
+    // {
+    //     auto vertex = baseVertsPtr[idx[i]]->vert4dList[idx[extrudeLocal]]
+    // }
+    const vertex4d& curr =
+        baseVertsPtr[extrudeLocal]->vert4dList[idx[extrudeLocal]];
+
+    const vertex4d& prev =
+        baseVertsPtr[extrudeLocal]->vert4dList[idx[extrudeLocal] - 1];
+    if(is_ft) 
+    {
+        return curr.nodeDiffGrads.row(node_id)(3) - prev.nodeDiffGrads.row(node_id)(3);
+    } 
+    return curr.nodeDiffVals[node_id] - prev.nodeDiffVals[node_id]; 
+}
+
 static Scalar cell5_time_edge_value_diff_equal_surf(
     const cell5&                     simp,
     const std::array<vertexCol*, 4>& baseVertsPtr,
@@ -1109,50 +1205,9 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
     bezierValsShared.setZero(CSGFuncNum, 35);
     bezierFtValsShared.setZero(CSGFuncNum, 35);
     std::vector<size_t> active_cell_ids; 
-    for(size_t si = 0; si < cell4Separators.size(); ++si)
-    {
-        
-        std::array<vertex4d*, 4>  sepVertsPtr;
-        bind_cell4_separator_verts( cell4Separators[si], sc.baseVertsPtr, sepVertsPtr);
-        for(int f_id = 0; f_id < CSGFuncNum; ++f_id)
-        {
-            Eigen::RowVector4d sepVals = {  sepVertsPtr[0]->vals[f_id],
-                                            sepVertsPtr[1]->vals[f_id],
-                                            sepVertsPtr[2]->vals[f_id],
-                                            sepVertsPtr[3]->vals[f_id]};
-            Scalar prev_ft_val = cell5_time_edge_value_diff(cell5Col[si], sc.baseVertsPtr, f_id);
-            Scalar next_ft_val = cell5_time_edge_value_diff(cell5Col[si+1], sc.baseVertsPtr, f_id);
-            // if(sepVals.maxCoeff() * sepVals.minCoeff() < 0)
-            // {
-            //     if(prev_ft_val * next_ft_val < 0)
-            //     {
-            //         active_cell_ids.push_back(si);
-            //         break;
-            //     }
-            // }
-            for(int f_id_b = f_id; f_id_b < CSGFuncNum; ++f_id_b)
-            {
-                sepVals = { sepVertsPtr[0]->vals[f_id] - sepVertsPtr[0]->vals[f_id_b],
-                            sepVertsPtr[1]->vals[f_id] - sepVertsPtr[1]->vals[f_id_b],
-                            sepVertsPtr[2]->vals[f_id] - sepVertsPtr[2]->vals[f_id_b],
-                            sepVertsPtr[3]->vals[f_id] - sepVertsPtr[3]->vals[f_id_b]};
-                if(sepVals.maxCoeff() * sepVals.minCoeff() < 0)
-                {
-                    Scalar prev_ft_val_b = cell5_time_edge_value_diff(cell5Col[si], sc.baseVertsPtr, f_id_b);
-                    Scalar next_ft_val_b = cell5_time_edge_value_diff(cell5Col[si+1], sc.baseVertsPtr, f_id_b);
-                    Scalar prev_eft_val = prev_ft_val - prev_ft_val_b;
-                    Scalar next_eft_val = next_ft_val - next_ft_val_b;
-                    if(prev_eft_val * next_eft_val < 0)
-                    {
-                        active_cell_ids.push_back(si);
-                        break;
-                    }
-                }
-            }
-        }
+    bool tet_equal_surface_0x = false;
+    std::vector<bool> cell5EfActiveStatus(cell5Col.size(), false);
     
-    }
-
     for (size_t ci = 0; ci < cell5Col.size(); ci++) {
 
         if (isTemporalRefine) {
@@ -1184,8 +1239,14 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
             tl.inside_tets.push_back({tetVids[0], tetVids[1], tetVids[2], tetVids[3]});
             return;
         }
-        if (zeroX) activeCol = true;
+        if (zeroX) 
+        {
+            activeCol = true;
+        }
+        // if(sc.cellDFuncFt0XIds.row(ci).sum() > 0) cell5EfActiveStatus[ci] = true;
 
+       
+        
         bool eqaulSurf0X = false;
         bool refineB3 = true;
         bool efFt0X = false;
@@ -1204,7 +1265,9 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
                         profileTimer, profileCount);
                     efFt0X = efFt0X || curEfFt0X;
                     if (eqaulSurf0X) {
+                        cell5EfActiveStatus[ci] = true;
                         activeCol = true;
+                        tet_equal_surface_0x = true;
                         pairToTets[{id_a, id_b}].push_back(ci);
                     }
                     if(needs_refine) break;
@@ -1335,8 +1398,127 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
         }
     }
 
+    Eigen::RowVectorXi colSums = sc.cellDFunc0XIds.colwise().sum();
+    int nonzeroCount = (colSums.array() != 0).count();
+
+    bool use_tree_node = false;
+    size_t tree_non_leaf_num = inputCSGTreePtr->get_num_nodes() - funcs.size();
+    if(use_tree_node)
+    {
+        for(size_t si = 0; si < cell4Separators.size(); ++si)
+        {
+            std::array<vertex4d*, 4>  sepVertsPtr;
+            bind_cell4_separator_verts( cell4Separators[si], sc.baseVertsPtr, sepVertsPtr);
+            
+            // std::unordered_map<int, std::pair<int, int>> ef_pairs; 
+            // for(int ni = 0; ni < tree_non_leaf_num; ++ni)
+            // {
+            //     for(int pi =0; pi < 4; ++ pi)
+            //     {
+            //         int fid_l = sepVertsPtr[pi]->nodeLeftLeafIds[ni];
+            //         int fid_r = sepVertsPtr[pi]->nodeRightLeafIds[ni];
+            //         if(fid_l == fid_r) continue;
+            //         std::pair<int,int> ef_pair = fid_l < fid_r? 
+            //                     std::pair<int,int>{fid_l, fid_r}:std::pair<int,int>{fid_r, fid_l};
+            //         int hash_key = ef_pair.first * (int)funcs.size() + ef_pair.second;
+            //         ef_pairs[hash_key] = ef_pair;
+            //     }
+            // }
+            // for(auto & ele : ef_pairs)
+            // {
+            //     auto [f_id_a, f_id_b] = ele.second;
+            //     Eigen::RowVector4d sepVals = { sepVertsPtr[0]->vals[f_id_a] - sepVertsPtr[0]->vals[f_id_b],
+            //                 sepVertsPtr[1]->vals[f_id_a] - sepVertsPtr[1]->vals[f_id_b],
+            //                 sepVertsPtr[2]->vals[f_id_a] - sepVertsPtr[2]->vals[f_id_b],
+            //                 sepVertsPtr[3]->vals[f_id_a] - sepVertsPtr[3]->vals[f_id_b]};
+            //     if(sepVals.maxCoeff() * sepVals.minCoeff() < 0)
+            //     {
+            //         Scalar prev_eft_val = cell5_time_edge_value_diff_equal_surf(cell5Col[si], sc.baseVertsPtr, f_id_a, f_id_b);
+            //         Scalar next_eft_val = cell5_time_edge_value_diff_equal_surf(cell5Col[si+1], sc.baseVertsPtr, f_id_a, f_id_b);
+            //         if(prev_eft_val * next_eft_val < 0)
+            //         {
+            //             active_cell_ids.push_back(si);
+            //             break;
+            //         }
+            //     }
+            // }
+
+            for(int ni = 0; ni < tree_non_leaf_num; ++ni)
+            {
+                Eigen::RowVector4d sepVals = {  sepVertsPtr[0]->nodeDiffVals[ni],
+                                                sepVertsPtr[1]->nodeDiffVals[ni],
+                                                sepVertsPtr[2]->nodeDiffVals[ni],
+                                                sepVertsPtr[3]->nodeDiffVals[ni]};
+                
+                if(sepVals.maxCoeff() * sepVals.minCoeff() <= 0)
+                {
+                    Scalar prev_ft_val = cell5_time_edge_value_diff_on_tree_node(cell5Col[si], sc.baseVertsPtr, ni);
+                    Scalar next_ft_val = cell5_time_edge_value_diff_on_tree_node(cell5Col[si+1], sc.baseVertsPtr, ni);
+                    if(prev_ft_val * next_ft_val <= 0)
+                    {
+                        active_cell_ids.push_back(si);
+                        break;
+                    }
+                }
+            }
+        }
+    } else {
+        for(size_t si = 0; si < cell4Separators.size(); ++si)
+        {
+            // if(!cell5EfActiveStatus[si] && !cell5EfActiveStatus[si]) continue;
+            std::array<vertex4d*, 4>  sepVertsPtr;
+            bind_cell4_separator_verts( cell4Separators[si], sc.baseVertsPtr, sepVertsPtr);
+            bool active_separator = false;
+            for(int f_id = 0; f_id < CSGFuncNum; ++f_id)
+            {
+                // if (sc.cellDFunc0XIds.row(si)(f_id) == 0 || sc.cellDFunc0XIds.row(si+1)(f_id) == 0) continue;
+                Eigen::RowVector4d sepVals = {  sepVertsPtr[0]->vals[f_id],
+                                                sepVertsPtr[1]->vals[f_id],
+                                                sepVertsPtr[2]->vals[f_id],
+                                                sepVertsPtr[3]->vals[f_id]};
+                Scalar prev_ft_val = cell5_time_edge_value_diff(cell5Col[si], sc.baseVertsPtr, f_id);
+                Scalar next_ft_val = cell5_time_edge_value_diff(cell5Col[si+1], sc.baseVertsPtr, f_id);
+                // if(sepVals.maxCoeff() * sepVals.minCoeff() < 0 && nonzeroCount >= 2 /* && nonzeroCount >= 1 */ )
+                // {
+                //      if(prev_ft_val * next_ft_val < 0)
+                //     {
+                //         active_cell_ids.push_back(si);
+                //         break;
+                //     }
+                // }
+                for(int f_id_b = f_id; f_id_b < CSGFuncNum; ++f_id_b)
+                {
+                    // if (sc.cellDFunc0XIds.row(si)(f_id_b) == 0 && sc.cellDFunc0XIds.row(si+1)(f_id_b) == 0) continue;
+                    sepVals = { sepVertsPtr[0]->vals[f_id] - sepVertsPtr[0]->vals[f_id_b],
+                                sepVertsPtr[1]->vals[f_id] - sepVertsPtr[1]->vals[f_id_b],
+                                sepVertsPtr[2]->vals[f_id] - sepVertsPtr[2]->vals[f_id_b],
+                                sepVertsPtr[3]->vals[f_id] - sepVertsPtr[3]->vals[f_id_b]};
+                    if(sepVals.maxCoeff() * sepVals.minCoeff() < 0)
+                    {
+                        Scalar prev_ft_val_b = cell5_time_edge_value_diff(cell5Col[si], sc.baseVertsPtr, f_id_b);
+                        Scalar next_ft_val_b = cell5_time_edge_value_diff(cell5Col[si+1], sc.baseVertsPtr, f_id_b);
+                        Scalar prev_eft_val = prev_ft_val - prev_ft_val_b;
+                        Scalar next_eft_val = next_ft_val - next_ft_val_b;
+                        if(prev_eft_val * next_eft_val < 0)
+                        {
+                            active_cell_ids.push_back(si);
+                            active_separator = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            // if(active_separator)
+            // {
+            //     si ++;
+            // }
+        }
+    }
+
     auto curTetKey = getTetKeyByVids(tetVids);
-    if(active_cell_ids.size() > 0 && activeCol)
+    // tet_equal_surface_0x
+    // if(active_cell_ids.size() > 0 && tet_equal_surface_0x)
+    if(active_cell_ids.size() > 0 && tet_equal_surface_0x)
     {
         tl.markEF_tet_keys.push_back(curTetKey);
         tl.markEF_tet_cell_ids_map[curTetKey] = active_cell_ids;
@@ -1466,7 +1648,8 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
                         if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
                         break;
                     }
-                } else if (20.0 * sc.longest_edge_length > threshold) {
+                } 
+                else if (20.0 * sc.longest_edge_length > threshold) {
                     if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
                     break;
                 }
@@ -1532,6 +1715,11 @@ static void do_temporal_split(
     }
     newVert.valGradList = {newVert.vals[0], newVert.grads.row(0)}; 
     newVert.active = false;
+    size_t csg_tree_non_leaf_num = inputCSGTreePtr->get_num_nodes() - funcs.size();
+    std::array<double,3> pos = {newVert.coord[0], newVert.coord[1], newVert.coord[2]};
+    calTreeNoLeafNodeDiffValsGrads(pos, tfp, csg_tree_non_leaf_num, 
+        newVert.nodeDiffVals, newVert.nodeDiffGrads, newVert.nodeLeftLeafIds, newVert.nodeRightLeafIds);
+    
     // newVert.valGradList = func(newVert.coord);
     timeList.insertTime(newVert);
     vertexMap[value_of(vid)] = std::move(timeList);

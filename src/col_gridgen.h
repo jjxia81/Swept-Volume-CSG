@@ -13,6 +13,7 @@
 #include "ref_crit.h"
 #include "tet_quality.h"
 #include "timer.h"
+#include <stf/stf.h>
 
 
 
@@ -151,4 +152,6 @@ mtet::Scalar calTimeGlobalScaleWithInitGridCSG(vertExtrude& vertexMap);
 mtet::Scalar calTimeGlobalScaleWithInitGrid(vertExtrude& vertexMap);
 
 uint64_t getTetKeyByVids(const std::span<VertexId, 4>& vs);
+
+extern stf::CSGTree<3>* inputCSGTreePtr;
 

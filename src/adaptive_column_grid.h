@@ -23,6 +23,7 @@ using namespace mtet;
 constexpr int MAX_TIME = 1 << 10; // 1024
 // constexpr int MIN_TIME = 1 << 2; //   4
 constexpr int MIN_TIME = 1 << 2; //   2
+// constexpr int MIN_TIME = 32; //   2
 constexpr int MAX_CELL_INTERVALS = 4 * (MAX_TIME / MIN_TIME); // 1024
 
 
@@ -46,8 +47,12 @@ public:
     size_t domfNum;
     Eigen::RowVector4d coord;
     funcVGrad valGradList;
-    Eigen::RowVectorXd vals; 
+    Eigen::RowVectorXd vals;
     MatrixX4dRowMajor grads;
+    Eigen::RowVectorXd nodeDiffVals;
+    MatrixX4dRowMajor nodeDiffGrads;
+    Eigen::RowVectorXi nodeLeftLeafIds;
+    Eigen::RowVectorXi nodeRightLeafIds;
     bool active = false;
 
     // std::vector<std::pair<Scalar, Eigen::RowVector4d>> valGradListCSG;

@@ -20,6 +20,7 @@
 #include <algorithm>
 #include "cell_msh_io.h"
 #include <chrono>
+#include <functional>
 
 template <typename Scalar, typename Index>
 lagrange::SurfaceMesh<Scalar, Index> isocontour_to_mesh(mtetcol::Contour<4>& isocontour)
@@ -796,6 +797,120 @@ lagrange::SurfaceMesh<Scalar, Index> envelope_complex_to_mesh(
     return mesh;
 }
 
+// template <typename Scalar, typename Index>
+// lagrange::SurfaceMesh<Scalar, Index> envelope_complex_to_mesh2(
+//     const cell_complex::CellComplex<4>& cc,
+//     size_t root_start,
+//     size_t num_leafs,
+//     const ankerl::unordered_dense::map<size_t, int>& junction_edge_labels)
+// {
+//     using namespace cell_complex;
+//     lagrange::SurfaceMesh<Scalar, Index> mesh;
+
+//     // --- vertices ---
+//     auto& vertices = cc.template get_cells<0>();
+//     const Index num_vertices = static_cast<Index>(vertices.size());
+//     mesh.add_vertices(num_vertices);
+
+//     mesh.template create_attribute<Scalar>(
+//         "time", lagrange::AttributeElement::Vertex,
+//         lagrange::AttributeUsage::Scalar, 1);
+//     auto time_values = lagrange::attribute_vector_ref<Scalar>(mesh, "time");
+
+//     ankerl::unordered_dense::map<size_t, Index> vertex_to_idx;
+//     vertex_to_idx.reserve(num_vertices);
+
+//     Index vi = 0;
+//     for (const auto& [key, vref] : vertices.items()) {
+//         const auto& v = vref.get();
+//         vertex_to_idx[get_index<0, 4>(key)] = vi;
+//         auto pos = mesh.ref_position(vi);
+//         pos[0] = static_cast<Scalar>(v.coordinates[0]);
+//         pos[1] = static_cast<Scalar>(v.coordinates[1]);
+//         pos[2] = static_cast<Scalar>(v.coordinates[2]);
+//         time_values[vi] = static_cast<Scalar>(v.coordinates[3]);
+//         ++vi;
+//     }
+
+//     // --- facets + per-facet/per-corner attributes ---
+//     auto& faces = cc.template get_cells<2>();
+
+//     lagrange::SmallVector<Index, 16> polygon;
+
+//     std::vector<uint8_t> facet_labels;
+//     std::vector<uint64_t> facet_dom_chunks;
+//     std::vector<int32_t> corner_edge_label;  // per-corner int label (0 = none)
+
+//     facet_labels.reserve(faces.size());
+//     facet_dom_chunks.reserve(faces.size());
+//     corner_edge_label.reserve(faces.size() * 3);
+
+//     for (auto& [face_key, fref] : faces.items()) {
+//         const auto& face = fref.get();
+
+//         auto ordered = detail::build_ordered_boundary_cycle<4>(cc, face.boundary);
+
+//         polygon.clear();
+//         polygon.reserve(ordered.size());
+//         lagrange::SmallVector<int32_t, 16> edge_labels_cycle;
+//         edge_labels_cycle.reserve(ordered.size());
+
+//         for (const auto& edge_key : ordered) {
+//             auto [tail, head] = detail::get_edge_directed_endpoints<4>(cc, edge_key);
+//             auto it = vertex_to_idx.find(get_index<0, 4>(tail));
+//             if (it == vertex_to_idx.end())
+//                 throw std::runtime_error("Vertex not found in envelope mesh map");
+//             polygon.push_back(it->second);
+
+//             size_t edge_raw = get_index<1, 4>(edge_key);
+//             auto lit = junction_edge_labels.find(edge_raw);
+//             edge_labels_cycle.push_back(
+//                 lit != junction_edge_labels.end() ? lit->second : 0);
+//         }
+
+//         // Negative orientation: same reverse-then-rotate as before.
+//         if (get_orientation<2, 4>(face_key) == Orientation::Negative) {
+//             std::reverse(polygon.begin(), polygon.end());
+//             std::reverse(edge_labels_cycle.begin(), edge_labels_cycle.end());
+//             std::rotate(
+//                 edge_labels_cycle.begin(),
+//                 edge_labels_cycle.begin() + 1,
+//                 edge_labels_cycle.end());
+//         }
+
+//         mesh.add_polygon({polygon.data(), polygon.size()});
+
+//         facet_labels.push_back(face.label);
+//         auto chunk = get_chunk(face.dominance, root_start, num_leafs);
+//         facet_dom_chunks.push_back(chunk.to_ullong());
+
+//         for (int32_t lbl : edge_labels_cycle) {
+//             corner_edge_label.push_back(lbl);
+//         }
+//     }
+
+//     mesh.template create_attribute<uint8_t>(
+//         "face_label", lagrange::AttributeElement::Facet,
+//         lagrange::AttributeUsage::Scalar, 1);
+//     auto face_label_attr = lagrange::attribute_vector_ref<uint8_t>(mesh, "face_label");
+//     std::copy(facet_labels.begin(), facet_labels.end(), face_label_attr.data());
+
+//     mesh.template create_attribute<uint64_t>(
+//         "face_dom_chunk", lagrange::AttributeElement::Facet,
+//         lagrange::AttributeUsage::Scalar, 1);
+//     auto face_dom_attr = lagrange::attribute_vector_ref<uint64_t>(mesh, "face_dom_chunk");
+//     std::copy(facet_dom_chunks.begin(), facet_dom_chunks.end(), face_dom_attr.data());
+
+//     mesh.template create_attribute<int32_t>(
+//         "corner_edge_label", lagrange::AttributeElement::Corner,
+//         lagrange::AttributeUsage::Scalar, 1);
+//     auto corner_attr = lagrange::attribute_vector_ref<int32_t>(mesh, "corner_edge_label");
+//     std::copy(corner_edge_label.begin(), corner_edge_label.end(), corner_attr.data());
+
+//     return mesh;
+// }
+
+
 template <typename Scalar, typename Index>
 lagrange::SurfaceMesh<Scalar, Index> envelope_complex_to_mesh2(
     const cell_complex::CellComplex<4>& cc,
@@ -836,6 +951,55 @@ lagrange::SurfaceMesh<Scalar, Index> envelope_complex_to_mesh2(
 
     lagrange::SmallVector<Index, 16> polygon;
 
+    struct PolygonKey {
+        std::vector<Index> vertices;
+
+        bool operator==(const PolygonKey& other) const
+        {
+            return vertices == other.vertices;
+        }
+    };
+
+    struct PolygonKeyHash {
+        size_t operator()(const PolygonKey& key) const
+        {
+            size_t h = std::hash<size_t>{}(key.vertices.size());
+            for (Index v : key.vertices) {
+                h ^= std::hash<Index>{}(v) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+            }
+            return h;
+        }
+    };
+
+    auto pack_polygon_key = [](const auto& poly) {
+        PolygonKey key;
+        key.vertices.assign(poly.begin(), poly.end());
+        std::sort(key.vertices.begin(), key.vertices.end());
+        return key;
+    };
+
+    ankerl::unordered_dense::map<PolygonKey, Index, PolygonKeyHash> polygon_counts;
+    polygon_counts.reserve(faces.size());
+
+    for (auto& [face_key, fref] : faces.items()) {
+        auto ordered = detail::build_ordered_boundary_cycle<4>(cc, fref.get().boundary);
+
+        polygon.clear();
+        polygon.reserve(ordered.size());
+        for (const auto& edge_key : ordered) {
+            auto [tail, head] = detail::get_edge_directed_endpoints<4>(cc, edge_key);
+            (void)head;
+            auto it = vertex_to_idx.find(get_index<0, 4>(tail));
+            if (it == vertex_to_idx.end())
+                throw std::runtime_error("Vertex not found in envelope mesh map");
+            polygon.push_back(it->second);
+        }
+        if (get_orientation<2, 4>(face_key) == Orientation::Negative) {
+            std::reverse(polygon.begin(), polygon.end());
+        }
+        polygon_counts[pack_polygon_key(polygon)]++;
+    }
+
     std::vector<uint8_t> facet_labels;
     std::vector<uint64_t> facet_dom_chunks;
     std::vector<int32_t> corner_edge_label;  // per-corner int label (0 = none)
@@ -875,6 +1039,10 @@ lagrange::SurfaceMesh<Scalar, Index> envelope_complex_to_mesh2(
                 edge_labels_cycle.begin(),
                 edge_labels_cycle.begin() + 1,
                 edge_labels_cycle.end());
+        }
+
+        if (polygon_counts[pack_polygon_key(polygon)] != 1) {
+            continue;
         }
 
         mesh.add_polygon({polygon.data(), polygon.size()});
@@ -1269,9 +1437,50 @@ lagrange::SurfaceMesh<Scalar, Index> extract_sweep_surface_from_arrangement2(
         static_cast<Index>(V.rows()),
         {V.data(), static_cast<size_t>(V.size())});
 
+    struct TriangleKey {
+        Index v0;
+        Index v1;
+        Index v2;
+
+        bool operator==(const TriangleKey& other) const
+        {
+            return v0 == other.v0 && v1 == other.v1 && v2 == other.v2;
+        }
+    };
+
+    struct TriangleKeyHash {
+        size_t operator()(const TriangleKey& key) const
+        {
+            size_t h = std::hash<Index>{}(key.v0);
+            h ^= std::hash<Index>{}(key.v1) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+            h ^= std::hash<Index>{}(key.v2) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+            return h;
+        }
+    };
+
+    auto pack_triangle_key = [](Index a, Index b, Index c) {
+        if (b < a) std::swap(a, b);
+        if (c < b) std::swap(b, c);
+        if (b < a) std::swap(a, b);
+        return TriangleKey{a, b, c};
+    };
+
+    ankerl::unordered_dense::map<TriangleKey, Index, TriangleKeyHash> triangle_counts;
+    triangle_counts.reserve(num_arrangement_facets);
+
+    for (Index fid = 0; fid < num_arrangement_facets; fid++) {
+        if (is_valid[fid] == 0) continue;
+        const auto key = pack_triangle_key(F(fid, 0), F(fid, 1), F(fid, 2));
+        triangle_counts[key]++;
+    }
+
     Index num_valid_facets = 0;
     for (Index fid = 0; fid < num_arrangement_facets; fid++) {
-        if (is_valid[fid] != 0) num_valid_facets++;
+        if (is_valid[fid] == 0) continue;
+        const auto key = pack_triangle_key(F(fid, 0), F(fid, 1), F(fid, 2));
+        if (triangle_counts[key] == 1) {
+            num_valid_facets++;
+        }
     }
     sweep_surface.add_triangles(num_valid_facets);
     auto sweep_F = facet_ref(sweep_surface);
@@ -1284,7 +1493,14 @@ lagrange::SurfaceMesh<Scalar, Index> extract_sweep_surface_from_arrangement2(
     for (Index fid = 0; fid < num_arrangement_facets; fid++) {
         if (is_valid[fid] == 0) {
             continue;
-        } else if (is_valid[fid] == 1) {
+        }
+
+        const auto key = pack_triangle_key(F(fid, 0), F(fid, 1), F(fid, 2));
+        if (triangle_counts[key] != 1) {
+            continue;
+        }
+
+        if (is_valid[fid] == 1) {
             sweep_F.row(count) = F.row(fid);
         } else {
             sweep_F.row(count) = F.row(fid).reverse();
@@ -1306,6 +1522,7 @@ lagrange::SurfaceMesh<Scalar, Index> extract_sweep_surface_from_arrangement2(
     count = 0;
     for (Index fid = 0; fid < num_arrangement_facets; fid++) {
         if (is_valid[fid] == 0) continue;
+        if (count >= num_valid_facets || sweep_to_arr_fid[count] != fid) continue;
         const Index sweep_c_begin = sweep_surface.get_facet_corner_begin(count);
         const Index arrang_c_begin = sweep_arrangement.get_facet_corner_begin(fid);
         if (is_valid[fid] == 1) {

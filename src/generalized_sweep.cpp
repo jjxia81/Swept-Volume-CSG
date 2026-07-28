@@ -27,6 +27,8 @@
 #include "cell_msh_io.h"
 #include "cell_obj_io.h"
 #include "cell_grid.h"
+#include "memory_recorder.h"
+
 
 namespace sweep {
 
@@ -323,6 +325,7 @@ void log_config(const GridSpec& grid_spec, const SweepOptions& options)
     sweep::logger().info("Initial time samples: {}", options.initial_time_samples);
     sweep::logger().info("Minimum tet radius ratio: {}", options.min_tet_radius_ratio);
     sweep::logger().info("Minimum tet edge length: {}", options.min_tet_edge_length);
+    sweep::logger().info("Build mix cell complex: {}", options.use_mix_cc);
     sweep::logger().info("=====================================");
 }
 
@@ -375,6 +378,9 @@ void load_config(std::filesystem::path config_path,
         }
         if (param_config["cyclic"]) {
             options.cyclic = param_config["cyclic"].as<bool>();
+        }
+        if (param_config["use_mix_cell_complex"]) {
+            options.use_mix_cc = param_config["use_mix_cell_complex"].as<bool>();
         }
         if (param_config["volume_threshold"]) {
             options.volume_threshold = param_config["volume_threshold"].as<double>();
@@ -467,6 +473,9 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
         SweepOptions options)
 {
     log_config(grid_spec, options);
+    inputCSGTreePtr = csgTreePtr;
+    size_t tree_non_leaf_num = inputCSGTreePtr->get_num_nodes() - funcs.size();
+    std::cout << " csg tree non leaf node number :" << tree_non_leaf_num << std::endl;
 
     auto init_grid_start = std::chrono::high_resolution_clock::now();
     SweepResult result;
@@ -519,8 +528,8 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
                 }
             }
             // simps = active_simps;
-            std::string mark_tets_dir = options.out_dir + "/marked_tets.bin";
-            save_column_mesh_binary(verts,simps, time, tetMarkTags, tetMarkActive4DtetIds, mark_tets_dir);
+            // std::string mark_tets_dir = options.out_dir + "/marked_tets.bin";
+            // save_column_mesh_binary(verts,simps, time, tetMarkTags, tetMarkActive4DtetIds, mark_tets_dir);
             std::string tet_dir = options.out_dir + "/active_tets.ply";
             write_tets_to_ply(verts, active_simps, tet_dir);
             std::string mark_tet_dir = options.out_dir + "/marked_tets.ply";
@@ -568,12 +577,60 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
         timeStartIndices.push_back(timeEndIndex);
     }
 
+    // const double time_buffer_dist = 32.0 / 1024.0; 
+    // std::vector<double> predefined_time_samples = {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0};
+    // for(size_t i = 0; i < time.size(); ++i)
+    // {
+    //     for(auto tVal : predefined_time_samples)
+    //     {
+    //         timeSamples.push_back(tVal);
+    //     }
+    //     timeEndIndex += predefined_time_samples.size();
+    //     timeStartIndices.push_back(timeEndIndex);
+    //     // std::array<double, 3> pos = {verts[3*i], verts[3*i + 1], verts[3*i + 2]};
+    //     // double min_f_val = std::numeric_limits<double>::max();
+    //     // size_t min_index = 0;
+    //     // for(size_t j =0; j < time[i].size(); ++j)
+    //     // {
+    //     //     double current_f_val = csgTreePtr->value(pos, time[i][j]);
+    //     //     if(min_f_val > current_f_val)
+    //     //     {
+    //     //         min_index = j; 
+    //     //         min_f_val = current_f_val;
+    //     //     }
+    //     // }
+    //     // double cur_t_max = 1.0;
+    //     // double cur_t_min = 0.0;
+    //     // if(time[i][min_index] = cur_t_min)
+    //     // {
+    //     //     timeSamples.push_back(cur_t_min);
+    //     //     timeSamples.push_back(cur_t_min + time_buffer_dist);
+    //     //     timeEndIndex += 2;
+    //     // } else if(time[i][min_index] = cur_t_max)
+    //     // {
+    //     //     timeSamples.push_back(cur_t_max - time_buffer_dist);
+    //     //     timeSamples.push_back(cur_t_max);
+    //     //     timeEndIndex += 2;
+    //     // } else {
+    //     //     timeSamples.push_back(std::max(time[i][min_index] - time_buffer_dist, cur_t_min) );
+    //     //     timeSamples.push_back(time[i][min_index]);
+    //     //     timeSamples.push_back(std::min(time[i][min_index] + time_buffer_dist, cur_t_max));
+    //     //     timeEndIndex += 3;
+    //     // }
+    //     // // timeEndIndex += time[i].size();
+    //     // timeStartIndices.push_back(timeEndIndex);
+    // }
+
     std::vector<size_t> active_pent_start_indices;
     active_pent_start_indices.push_back(0);
     std::vector<size_t> active_pent_indices;
     size_t tetEndIndex = 0;
     for(size_t i = 0; i < marktetMarkActive4DtetIds.size(); ++i)
     {
+        if(marktetMarkActive4DtetIds[i].empty())
+        {
+            std::cout << " there is no separators in this column " << std::endl;
+        }
         for(auto id : marktetMarkActive4DtetIds[i])
         {
             active_pent_indices.push_back(id);
@@ -589,13 +646,39 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
         cell_complex::SimplicialColumnsOptions cc_options;
         // cc_options.pent_column_mode  = cell_complex::PentColumnMode::ActiveConnectedComponents;
         cc_options.pent_column_mode  = cell_complex::PentColumnMode::ActiveSeparators;
+        // cc_options.pent_column_mode  = cell_complex::PentColumnMode::ActiveSeparatorMerger;
         // ccSelect = cell_complex::from_simplicial_columns<4>(verts, simps, timeSamples, timeStartIndices);
-        ccSelect =  cell_complex::from_columns_and_pentachora(
-        verts, unmark_simps, timeSamples, timeStartIndices, mark_simps,
-        cc_options, active_pent_start_indices, active_pent_indices);
+        logger().info("Marked 3D tets num: {} ", mark_simps.size()/4);
+        logger().info("Marked separator num: {} ", active_pent_indices.size());
+        auto cc_build_start = std::chrono::high_resolution_clock::now();
+        bool using_mix_cc = options.use_mix_cc;
+        // MemoryRecorder mem(
+        //         options.out_dir + "/memory_build_cc.csv",
+        //         200
+        //     );
+        if(using_mix_cc)
+        {
+            
+            ccSelect =  cell_complex::from_columns_and_pentachora(
+                verts, unmark_simps, timeSamples, timeStartIndices, mark_simps,
+                cc_options, active_pent_start_indices, active_pent_indices);
+
+        } else {
+            ccSelect = cell_complex::from_simplicial_columns<4>(verts, simps, timeSamples, timeStartIndices);
+        }
         logger().info("Successfully generated column grid");
-        verts.clear(); simps.clear();timeSamples.clear();
+        std::cout << "0-cells: " << ccSelect.num_cells<0>() << "\n";
+        std::cout << "1-cells: " << ccSelect.num_cells<1>() << "\n";
+        std::cout << "2-cells: " << ccSelect.num_cells<2>() << "\n";
+        std::cout << "3-cells: " << ccSelect.num_cells<3>() << "\n";
+        std::cout << "4-cells: " << ccSelect.num_cells<4>() << "\n";
         
+        auto cc_build_end = std::chrono::high_resolution_clock::now();
+        logger().info(
+                    "Building cell complex takes time: {} seconds",
+                    std::chrono::duration<double>(cc_build_end - cc_build_start).count());
+
+        verts.clear(); simps.clear();timeSamples.clear();
         mark_simps.clear();
         unmark_simps.clear();
         timeStartIndices.clear(); time.clear();       
@@ -605,12 +688,22 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
         ccSelect = cell_complex::load_uniform_grid<4>(grid_config_path);
         logger().info("cell complex successfully generated from config file");
     }
-    
+    auto logger_level = spdlog::level::info;
+    auto cc_logger = cell_complex::get_logger();
+    cc_logger->set_level(logger_level);
+
     cell_complex::algorithm::SilhouetteComplexOptions cell_options;
     cell_options.max_temporal_edge_length = 0.01; // Adjust as needed
     // cell_options.cut_time_derivative_difference = true;
-    // ccSelect.refine_long_edges(0.002);
-    cell_complex::algorithm::compute_silhouette_complex(ccSelect, *csgTreePtr, cell_options);
+    cell_options.refine_time_derivative_silhouette = false;
+    {
+        // MemoryRecorder mem(
+        //     options.out_dir + "/memory_compute_silhouette_complex.csv",
+        //     200
+        // );
+        ccSelect.refine_long_edges(cell_options.max_temporal_edge_length);
+        cell_complex::algorithm::compute_silhouette_complex(ccSelect, *csgTreePtr, cell_options);
+    }
     // cell_complex::save_obj(options.out_dir + "/silhouette.obj", ccSelect);
     // cell_complex::save_msh(options.out_dir + "/silhouette.msh", ccSelect);
     ccSelect.validate();
@@ -621,8 +714,15 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
 
     // cell_complex::algorithm::EnvelopeComplexOptions envelope_options;
     // envelope_options.use_snapping = options.with_snapping;
-    bool use_halley_methtod = false;
-    cell_complex::algorithm::compute_envelope_complex(ccSelect, *csgTreePtr, use_halley_methtod);
+    bool use_halley_methtod = true;
+    {
+        // MemoryRecorder mem(
+        //     options.out_dir + "/memory_compute_envelope_complex.csv",
+        //     100
+        // );
+        cell_complex::algorithm::compute_envelope_complex(ccSelect, *csgTreePtr, use_halley_methtod);
+    }
+    
     
     auto sf_end = std::chrono::high_resolution_clock::now();
     logger().info(
@@ -634,8 +734,8 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     // Convert envelope cell complex -> lagrange mesh with "time" attribute
     // Triangulate polygonal 2-cells in place
     cell_complex::triangulate_all_2cells(ccSelect);
+    cell_complex::save_obj(options.out_dir + "/envelope.obj", ccSelect);
 
-    // cell_complex::save_obj(options.out_dir + "/envelope.obj", ccSelect);
     // cell_complex::save_msh(options.out_dir + "/envelope.msh", ccSelect);
 
     // auto envelope_mesh = envelope_complex_to_mesh<Scalar, uint32_t>(ccSelect);
@@ -655,10 +755,10 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     edges_labels,
     ccSelect);
     // cell_complex::save_edges_to_obj(options.out_dir + "/feature_edges_from_ccEnvelop.obj", junction_edges, ccSelect);
-    cell_complex::save_edges_to_mathematica(options.out_dir + "/feature_edges_from_ccEnvelop.m",
-    junction_edges,
-    edges_labels,
-    ccSelect);
+    // cell_complex::save_edges_to_mathematica(options.out_dir + "/feature_edges_from_ccEnvelop.m",
+    // junction_edges,
+    // edges_labels,
+    // ccSelect);
     auto saving_end = std::chrono::time_point_cast<std::chrono::microseconds>(
                           std::chrono::high_resolution_clock::now())
                           .time_since_epoch()

@@ -22,9 +22,20 @@ using namespace mtet;
 
 constexpr int MAX_TIME = 1 << 10; // 1024
 // constexpr int MIN_TIME = 1 << 2; //   4
-constexpr int MIN_TIME = 1 << 2; //   2
+// constexpr int MIN_TIME = 1 << 2; //   2
+// int MIN_TIME = 1 << 2; //   2
 // constexpr int MIN_TIME = 32; //   2
-constexpr int MAX_CELL_INTERVALS = 4 * (MAX_TIME / MIN_TIME); // 1024
+// constexpr int MAX_CELL_INTERVALS = 4 * (MAX_TIME / MIN_TIME); // 1024
+// int MAX_CELL_INTERVALS = 4 * (MAX_TIME / MIN_TIME); // 1024
+
+extern int MIN_TIME;
+extern int MAX_CELL_INTERVALS;
+
+// bool set_min_time_from_config(const int min_time_set)
+// {
+//     MIN_TIME = min_time_set;
+//     MAX_CELL_INTERVALS = 4 * (MAX_TIME / MIN_TIME);
+// }
 
 
 // constexpr int MAX_TIME = 0; // 1024

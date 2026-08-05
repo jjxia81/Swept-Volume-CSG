@@ -376,6 +376,271 @@ static mtetcol::Contour<4> extract_column_contour(
     return column.extract_contour(0.0, false);
 }
 
+
+
+// Writes a 3D PLY mesh.  `faces` contains zero-based vertex-index polygons.
+static bool write_ply_3d(
+    const std::filesystem::path& path,
+    const std::vector<Eigen::RowVector3d>& vertices,
+    const std::vector<std::vector<mtetcol::Index>>& faces)
+{
+    std::ofstream out(path);
+    if (!out) {
+        std::cerr << "Could not open PLY file for writing: " << path << '\n';
+        return false;
+    }
+
+    out << "ply\n"
+        << "format ascii 1.0\n"
+        << "element vertex " << vertices.size() << "\n"
+        << "property double x\n"
+        << "property double y\n"
+        << "property double z\n"
+        << "element face " << faces.size() << "\n"
+        << "property list uchar int vertex_indices\n"
+        << "end_header\n";
+
+    out << std::setprecision(17);
+    for (const auto& p : vertices)
+        out << p.x() << ' ' << p.y() << ' ' << p.z() << '\n';
+
+    for (const auto& face : faces) {
+        out << face.size();
+        for (mtetcol::Index id : face) out << ' ' << id;
+        out << '\n';
+    }
+    return static_cast<bool>(out);
+}
+
+static std::vector<std::vector<mtetcol::Index>> tetra_boundary_faces()
+{
+    // The orientation is immaterial for visual debugging; these are the four
+    // triangular boundary faces of a regular contour polyhedron (a tetrahedron).
+    return {{0, 2, 1}, {0, 1, 3}, {0, 3, 2}, {1, 2, 3}};
+}
+
+// Convert the contour's stored signed cycles into the actual oriented PLY faces
+// of one polyhedron.  Unlike tetra_boundary_faces(), this does not assume that
+// the polyhedron has four triangular faces.
+static void contour_polyhedron_faces(
+    const mtetcol::Contour<4>& contour,
+    mtetcol::Index polyhedron_id,
+    std::vector<Eigen::RowVector3d>& vertices,
+    std::vector<std::vector<mtetcol::Index>>& faces,
+    std::vector<mtetcol::Index>& global_vertex_ids)
+{
+    std::unordered_map<mtetcol::Index, mtetcol::Index> local_id;
+    auto to_local_id = [&](mtetcol::Index global_id) {
+        const auto [it, inserted] = local_id.emplace(global_id, local_id.size());
+        if (inserted) {
+            const auto p = contour.get_vertex(global_id);
+            vertices.emplace_back(p[0], p[1], p[2]); // deliberately discard t
+            global_vertex_ids.push_back(global_id);
+        }
+        return it->second;
+    };
+
+    // A polyhedron is an oriented collection of cycles (its boundary faces).
+    for (mtetcol::SignedIndex signed_cycle : contour.get_polyhedron(polyhedron_id)) {
+        std::vector<mtetcol::Index> face;
+        for (mtetcol::SignedIndex signed_segment :
+             contour.get_cycle(mtetcol::index(signed_cycle))) {
+            const auto segment = contour.get_segment(mtetcol::index(signed_segment));
+            const mtetcol::Index global_id =
+                mtetcol::orientation(signed_segment) ? segment[0] : segment[1];
+            face.push_back(to_local_id(global_id));
+        }
+
+        // The signed cycle controls whether this face uses the stored winding
+        // or its reverse in the enclosing polyhedron.
+        if (!mtetcol::orientation(signed_cycle)) {
+            std::reverse(face.begin(), face.end());
+        }
+        if (face.size() >= 3) faces.push_back(std::move(face));
+    }
+}
+
+// Write the original space-time coordinate for every local PLY vertex.  The
+// `ply_vertex_id` column matches the zero-based vertex index in the companion
+// contour PLY file.
+static bool write_contour_time_csv(
+    const std::filesystem::path& path,
+    const mtetcol::Contour<4>& contour,
+    const std::vector<mtetcol::Index>& global_vertex_ids)
+{
+    std::ofstream out(path);
+    if (!out) {
+        std::cerr << "Could not open contour time file for writing: " << path << '\n';
+        return false;
+    }
+
+    out << "ply_vertex_id,contour_vertex_id,x,y,z,t\n" << std::setprecision(17);
+    for (size_t local_id = 0; local_id < global_vertex_ids.size(); ++local_id) {
+        const mtetcol::Index global_id = global_vertex_ids[local_id];
+        const auto p = contour.get_vertex(global_id);
+        out << local_id << ',' << global_id << ','
+            << p[0] << ',' << p[1] << ',' << p[2] << ',' << p[3] << '\n';
+    }
+    return static_cast<bool>(out);
+}
+
+using ContourTet = std::array<mtetcol::Index, 4>;
+
+// Return the ordered vertices of one contour cycle. `signed_cycle` is signed
+// because a polyhedron may use a stored cycle with reversed orientation.
+static std::vector<mtetcol::Index> contour_cycle_vertices(
+    const mtetcol::Contour<4>& contour,
+    mtetcol::SignedIndex signed_cycle)
+{
+    std::vector<mtetcol::Index> vertices;
+    for (mtetcol::SignedIndex signed_segment :
+         contour.get_cycle(mtetcol::index(signed_cycle))) {
+        const auto segment = contour.get_segment(mtetcol::index(signed_segment));
+        vertices.push_back(
+            mtetcol::orientation(signed_segment) ? segment[0] : segment[1]);
+    }
+    if (!mtetcol::orientation(signed_cycle)) {
+        std::reverse(vertices.begin(), vertices.end());
+    }
+    return vertices;
+}
+
+/// Decompose one triangular-prism contour polyhedron into three tetrahedra.
+///
+/// Returns false unless the polyhedron has exactly two triangular faces and
+/// three quadrilateral side faces.  The returned vertex IDs refer to `contour`.
+/// This is a topological decomposition; it preserves the existing 4D vertices
+/// and only adds internal diagonals.
+static bool prism_to_tetrahedra(
+    const mtetcol::Contour<4>& contour,
+    mtetcol::Index polyhedron_id,
+    std::vector<ContourTet>& tetrahedra)
+{
+    tetrahedra.clear();
+    const auto polyhedron = contour.get_polyhedron(polyhedron_id);
+    if (polyhedron.size() != 5) return false;
+
+    std::vector<std::vector<mtetcol::Index>> faces;
+    faces.reserve(5);
+    std::array<size_t, 2> triangle_faces{};
+    size_t num_triangles = 0;
+
+    for (mtetcol::SignedIndex signed_cycle : polyhedron) {
+        auto face = contour_cycle_vertices(contour, signed_cycle);
+        if (face.size() == 3) {
+            if (num_triangles == triangle_faces.size()) return false;
+            triangle_faces[num_triangles++] = faces.size();
+        } else if (face.size() != 4) {
+            return false;
+        }
+        faces.push_back(std::move(face));
+    }
+    if (num_triangles != 2) return false;
+
+    const auto& lower = faces[triangle_faces[0]];
+    const auto& upper = faces[triangle_faces[1]];
+    std::unordered_set<mtetcol::Index> lower_ids(lower.begin(), lower.end());
+    std::unordered_set<mtetcol::Index> upper_ids(upper.begin(), upper.end());
+    if (lower_ids.size() != 3 || upper_ids.size() != 3) return false;
+    for (mtetcol::Index id : lower_ids)
+        if (upper_ids.contains(id)) return false;
+
+    // Each lower prism vertex occurs in two quad faces. The upper vertex that
+    // occurs with it in both of those faces is its vertical prism partner.
+    std::unordered_map<mtetcol::Index, mtetcol::Index> upper_of_lower;
+    for (mtetcol::Index lower_id : lower) {
+        std::unordered_map<mtetcol::Index, int> upper_occurrences;
+        int quad_occurrences = 0;
+        for (const auto& face : faces) {
+            if (face.size() != 4 ||
+                std::find(face.begin(), face.end(), lower_id) == face.end()) {
+                continue;
+            }
+            ++quad_occurrences;
+            for (mtetcol::Index id : face)
+                if (upper_ids.contains(id)) ++upper_occurrences[id];
+        }
+        if (quad_occurrences != 2) return false;
+
+        mtetcol::Index upper_id = mtetcol::invalid_index;
+        for (const auto& [candidate, occurrences] : upper_occurrences) {
+            if (occurrences != 2) continue;
+            if (upper_id != mtetcol::invalid_index) return false;
+            upper_id = candidate;
+        }
+        if (upper_id == mtetcol::invalid_index) return false;
+        upper_of_lower.emplace(lower_id, upper_id);
+    }
+    if (upper_of_lower.size() != 3) return false;
+
+    const mtetcol::Index a = lower[0];
+    const mtetcol::Index b = lower[1];
+    const mtetcol::Index c = lower[2];
+    const mtetcol::Index ap = upper_of_lower.at(a);
+    const mtetcol::Index bp = upper_of_lower.at(b);
+    const mtetcol::Index cp = upper_of_lower.at(c);
+    if (ap == bp || bp == cp || ap == cp) return false;
+
+    // Standard triangular-prism decomposition.  The three tetrahedra share
+    // internal faces only and cover the entire prism.
+    tetrahedra = {{a, b, c, cp}, {a, b, bp, cp}, {a, ap, bp, cp}};
+    return true;
+}
+
+/// Save a column's base tetrahedron and every contour polyhedron as separate
+/// 3D PLY files. Contour positions are (x, y, z, t); t is discarded.
+///
+/// Files written:
+///   <output_dir>/<stem>_base.ply
+///   <output_dir>/<stem>_contour_0.ply, <stem>_contour_1.ply, ...
+///   <output_dir>/<stem>_contour_0_time.csv, ... (original x, y, z, t)
+///
+static bool save_column_contour_plys(
+    const std::array<mtet::Scalar, 12>& spatial_verts,
+    const mtetcol::Contour<4>& contour,
+    const std::filesystem::path& output_dir,
+    const std::string& stem)
+{
+    std::error_code ec;
+    std::filesystem::create_directories(output_dir, ec);
+    if (ec) {
+        std::cerr << "Could not create PLY output directory: " << output_dir
+                  << " (" << ec.message() << ")\n";
+        return false;
+    }
+
+    std::vector<Eigen::RowVector3d> base_vertices;
+    base_vertices.reserve(4);
+    for (size_t i = 0; i < 4; ++i) {
+        base_vertices.emplace_back(
+            spatial_verts[3 * i], spatial_verts[3 * i + 1], spatial_verts[3 * i + 2]);
+    }
+    if (!write_ply_3d(output_dir / (stem + "_base.ply"),
+                      base_vertices, tetra_boundary_faces())) {
+        return false;
+    }
+
+    for (int pi = 0; pi < contour.get_num_polyhedra(); ++pi) {
+        std::vector<Eigen::RowVector3d> polygon_vertices;
+        std::vector<std::vector<mtetcol::Index>> polygon_faces;
+        std::vector<mtetcol::Index> global_vertex_ids;
+        contour_polyhedron_faces(
+            contour, pi, polygon_vertices, polygon_faces, global_vertex_ids);
+
+        if (!write_ply_3d(
+                output_dir / (stem + "_contour_" + std::to_string(pi) + ".ply"),
+                polygon_vertices, polygon_faces)) {
+            return false;
+        }
+        if (!write_contour_time_csv(
+                output_dir / (stem + "_contour_" + std::to_string(pi) + "_time.csv"),
+                contour, global_vertex_ids)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool cell5_intersects_poly(
     const cell5&                                   simp,
     const std::vector<mtetcol::Index>&             vert_id,
@@ -1463,8 +1728,21 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
             }
         }
     } else {
+
+        
         for(size_t si = 0; si < cell4Separators.size(); ++si)
         {
+            // if(sc.cellDFunc0XIds.row(0).sum() > 0)
+            // {
+            //     active_cell_ids.push_back(0);
+            //     continue;
+            // }
+
+            // if(sc.cellDFunc0XIds.row(cell4Separators.size() - 1).sum() > 0)
+            // {
+            //     active_cell_ids.push_back(cell4Separators.size() - 1);
+            //     continue;
+            // }
             // if(!cell5EfActiveStatus[si] && !cell5EfActiveStatus[si]) continue;
             std::array<vertex4d*, 4>  sepVertsPtr;
             bind_cell4_separator_verts( cell4Separators[si], sc.baseVertsPtr, sepVertsPtr);
@@ -1478,35 +1756,44 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
                                                 sepVertsPtr[3]->vals[f_id]};
                 Scalar prev_ft_val = cell5_time_edge_value_diff(cell5Col[si], sc.baseVertsPtr, f_id);
                 Scalar next_ft_val = cell5_time_edge_value_diff(cell5Col[si+1], sc.baseVertsPtr, f_id);
-                // if(sepVals.maxCoeff() * sepVals.minCoeff() < 0 && nonzeroCount >= 2 /* && nonzeroCount >= 1 */ )
-                // {
-                //      if(prev_ft_val * next_ft_val < 0)
-                //     {
-                //         active_cell_ids.push_back(si);
-                //         break;
-                //     }
-                // }
-                for(int f_id_b = f_id; f_id_b < CSGFuncNum; ++f_id_b)
+                if(sepVals.maxCoeff() * sepVals.minCoeff() < 0 /* &&  nonzeroCount >= 2  && nonzeroCount >= 1 */ )
                 {
-                    // if (sc.cellDFunc0XIds.row(si)(f_id_b) == 0 && sc.cellDFunc0XIds.row(si+1)(f_id_b) == 0) continue;
-                    sepVals = { sepVertsPtr[0]->vals[f_id] - sepVertsPtr[0]->vals[f_id_b],
-                                sepVertsPtr[1]->vals[f_id] - sepVertsPtr[1]->vals[f_id_b],
-                                sepVertsPtr[2]->vals[f_id] - sepVertsPtr[2]->vals[f_id_b],
-                                sepVertsPtr[3]->vals[f_id] - sepVertsPtr[3]->vals[f_id_b]};
-                    if(sepVals.maxCoeff() * sepVals.minCoeff() < 0)
+                    if (sc.cellDFunc0XIds.row(si)(f_id) != 0 || sc.cellDFunc0XIds.row(si+1)(f_id) != 0)
                     {
-                        Scalar prev_ft_val_b = cell5_time_edge_value_diff(cell5Col[si], sc.baseVertsPtr, f_id_b);
-                        Scalar next_ft_val_b = cell5_time_edge_value_diff(cell5Col[si+1], sc.baseVertsPtr, f_id_b);
-                        Scalar prev_eft_val = prev_ft_val - prev_ft_val_b;
-                        Scalar next_eft_val = next_ft_val - next_ft_val_b;
-                        if(prev_eft_val * next_eft_val < 0)
+                        if(prev_ft_val * next_ft_val < 0 )
                         {
                             active_cell_ids.push_back(si);
-                            active_separator = true;
+                            // continue;
                             break;
                         }
                     }
                 }
+                if(tet_equal_surface_0x)
+                {
+                    for(int f_id_b = f_id; f_id_b < CSGFuncNum; ++f_id_b)
+                    {
+                        // if (sc.cellDFunc0XIds.row(si)(f_id_b) == 0 && sc.cellDFunc0XIds.row(si+1)(f_id_b) == 0) continue;
+                        sepVals = { sepVertsPtr[0]->vals[f_id] - sepVertsPtr[0]->vals[f_id_b],
+                                    sepVertsPtr[1]->vals[f_id] - sepVertsPtr[1]->vals[f_id_b],
+                                    sepVertsPtr[2]->vals[f_id] - sepVertsPtr[2]->vals[f_id_b],
+                                    sepVertsPtr[3]->vals[f_id] - sepVertsPtr[3]->vals[f_id_b]};
+                        if(sepVals.maxCoeff() * sepVals.minCoeff() < 0)
+                        {
+                            Scalar prev_ft_val_b = cell5_time_edge_value_diff(cell5Col[si], sc.baseVertsPtr, f_id_b);
+                            Scalar next_ft_val_b = cell5_time_edge_value_diff(cell5Col[si+1], sc.baseVertsPtr, f_id_b);
+                            Scalar prev_eft_val = prev_ft_val - prev_ft_val_b;
+                            Scalar next_eft_val = next_ft_val - next_ft_val_b;
+                            if(prev_eft_val * next_eft_val < 0)
+                            {
+                                active_cell_ids.push_back(si);
+                                active_separator = true;
+                                break;
+                            }
+                        }
+                    }
+
+                }
+                
             }
             // if(active_separator)
             // {
@@ -1518,7 +1805,12 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
     auto curTetKey = getTetKeyByVids(tetVids);
     // tet_equal_surface_0x
     // if(active_cell_ids.size() > 0 && tet_equal_surface_0x)
-    if(active_cell_ids.size() > 0 && tet_equal_surface_0x)
+    // if(active_cell_ids.size() > 0 && tet_equal_surface_0x)
+    // {
+    //     tl.markEF_tet_keys.push_back(curTetKey);
+    //     tl.markEF_tet_cell_ids_map[curTetKey] = active_cell_ids;
+    // }
+    if(active_cell_ids.size() > 0)
     {
         tl.markEF_tet_keys.push_back(curTetKey);
         tl.markEF_tet_cell_ids_map[curTetKey] = active_cell_ids;
@@ -1639,7 +1931,7 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
                     for (int vi = 0; vi < (int)vert_id.size(); vi++) {
                         sc.polygonVerts[vi].coord = contour_pos[vert_id[vi]];
                         auto valGradListA = funcs[fid_a](sc.polygonVerts[vi].coord);
-                        auto valGradListB = funcs[fid_a](sc.polygonVerts[vi].coord);  // NOTE: original has fid_a here too
+                        auto valGradListB = funcs[fid_b](sc.polygonVerts[vi].coord);  // NOTE: original has fid_a here too
                         sc.polygonVerts[vi].valGradList = {
                             valGradListA.first + valGradListB.first,
                             valGradListA.second + valGradListB.second};
@@ -1649,9 +1941,81 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
                         break;
                     }
                 } 
-                else if (20.0 * sc.longest_edge_length > threshold) {
-                    if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
-                    break;
+                else 
+                if (20.0 * sc.longest_edge_length > threshold) 
+                {
+                    // std::vector<ContourTet> simple_tets;
+                    // if (prism_to_tetrahedra(contour, pi, simple_tets))
+                    // {
+                    //     for (const ContourTet& tet : simple_tets) 
+                    //     {
+                    //         for (int vi = 0; vi < 4; vi++) {
+                    //             const auto cur_pt = contour.get_vertex(tet[vi]);
+                    //             sc.polygonVerts[vi].coord = {cur_pt[0], cur_pt[1], cur_pt[2], cur_pt[3]};
+                    //             auto valGradListA = funcs[fid_a](sc.polygonVerts[vi].coord);
+                    //             auto valGradListB = funcs[fid_b](sc.polygonVerts[vi].coord);  // NOTE: original has fid_a here too
+                    //             sc.polygonVerts[vi].valGradList = {
+                    //                 valGradListA.first + valGradListB.first,
+                    //                 valGradListA.second + valGradListB.second};
+                    //         }
+                    //         if (refine3D(sc.polygonVerts, threshold )) {
+                    //             if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
+                    //             break;
+                    //         }
+                    //     }
+                    //     size_t contour_vn = contour.get_num_vertices();
+                    //     bool check_bot_cap_tet = false;
+                    //     bool check_top_cap_tet = false;
+                    //     for(size_t vi = 0; vi < contour_vn; ++vi)
+                    //     {
+                    //         const auto cur_pt = contour.get_vertex(vi);
+                    //         if(cur_pt[3] == 0)
+                    //         {
+                    //             check_bot_cap_tet = true;
+                    //         }  else if(cur_pt[3] == 1) {
+                    //             check_top_cap_tet = true;
+                    //         }
+                    //     }
+                    //     if(check_bot_cap_tet)
+                    //     {
+                    //         for (int vi = 0; vi < 4; vi++) {
+                    //             const auto cur_pt = sc.baseVertsPtr[vi]->vert4dList.front();
+                    //             sc.polygonVerts[vi].coord = cur_pt.coord;
+                    //             auto valAB = cur_pt.vals[fid_a] + cur_pt.vals[fid_b];
+                    //             auto gradAB = cur_pt.grads.row(fid_a) + cur_pt.grads.row(fid_b);
+                    //             sc.polygonVerts[vi].valGradList = {valAB, gradAB};
+                    //         }
+                    //         if (refine3D(sc.polygonVerts, threshold )) {
+                    //             if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
+                    //             break;
+                    //         }
+                    //     }
+                    //     if(check_top_cap_tet)
+                    //     {
+                    //         for (int vi = 0; vi < 4; vi++) {
+                    //             const auto cur_pt = sc.baseVertsPtr[vi]->vert4dList.back();
+                    //             sc.polygonVerts[vi].coord = cur_pt.coord;
+                    //             auto valAB = cur_pt.vals[fid_a] + cur_pt.vals[fid_b];
+                    //             auto gradAB = cur_pt.grads.row(fid_a) + cur_pt.grads.row(fid_b);
+                    //             sc.polygonVerts[vi].valGradList = {valAB, gradAB};
+                    //         }
+                    //         if (refine3D(sc.polygonVerts, threshold )) {
+                    //             if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
+                    //             break;
+                    //         }
+                    //     }
+
+                    // } else 
+                    {
+                        // save_column_contour_plys(
+                        //     spatial_verts,
+                        //     contour,
+                        //     "output/debug_over_refine/",
+                        //     "tet_" + std::to_string(value_of(tid)) +
+                        //         "_pair_" + std::to_string(fid_a) + "_" + std::to_string(fid_b));
+                        if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
+                        break;
+                    }
                 }
             }
         }

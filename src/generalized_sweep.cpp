@@ -30,6 +30,9 @@
 #include "memory_recorder.h"
 
 
+int MIN_TIME = 1 << 2;  // 4
+int MAX_CELL_INTERVALS = 4 * (MAX_TIME / MIN_TIME);
+
 namespace sweep {
 
 Scalar SweepOptions::time_start = 0.0;
@@ -472,6 +475,9 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
         GridSpec grid_spec, 
         SweepOptions options)
 {
+    // set_min_time_from_config(options.min_time_edge_length);
+    MIN_TIME = options.min_time_edge_length;
+    MAX_CELL_INTERVALS = 4 * (MAX_TIME / MIN_TIME);
     log_config(grid_spec, options);
     inputCSGTreePtr = csgTreePtr;
     size_t tree_non_leaf_num = inputCSGTreePtr->get_num_nodes() - funcs.size();
@@ -722,6 +728,14 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
         // );
         cell_complex::algorithm::compute_envelope_complex(ccSelect, *csgTreePtr, use_halley_methtod);
     }
+
+    
+
+    cell_complex::SaveMshOptions opts;
+    opts.dominant_leaf_root_bit = csgTreePtr->get_root_index() * num_leafs;
+    opts.dominant_leaf_num_leafs = num_leafs;
+    // opts.save_dominance_bits = true;
+    // cell_complex::save_msh(options.out_dir + "/envelope.msh", ccSelect, opts);
     
     
     auto sf_end = std::chrono::high_resolution_clock::now();
@@ -736,7 +750,7 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     cell_complex::triangulate_all_2cells(ccSelect);
     cell_complex::save_obj(options.out_dir + "/envelope.obj", ccSelect);
 
-    // cell_complex::save_msh(options.out_dir + "/envelope.msh", ccSelect);
+    
 
     // auto envelope_mesh = envelope_complex_to_mesh<Scalar, uint32_t>(ccSelect);
     // auto envelope_mesh = envelope_complex_to_mesh<Scalar, uint32_t>
@@ -846,7 +860,7 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     options.out_dir + "/sweep_surface_labeled.ply",
     result.sweep_surface);
 
-    save_sweep_surface_msh<Scalar, uint32_t>(options.out_dir + "/sweep_surface_labeled.msh", result.sweep_surface);
+    // save_sweep_surface_msh<Scalar, uint32_t>(options.out_dir + "/sweep_surface_labeled.msh", result.sweep_surface);
         
     
     return result;

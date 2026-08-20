@@ -1749,7 +1749,7 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
             bool active_separator = false;
             for(int f_id = 0; f_id < CSGFuncNum; ++f_id)
             {
-                // if (sc.cellDFunc0XIds.row(si)(f_id) == 0 || sc.cellDFunc0XIds.row(si+1)(f_id) == 0) continue;
+                if (sc.cellDFunc0XIds.row(si)(f_id) == 0 || sc.cellDFunc0XIds.row(si+1)(f_id) == 0) continue;
                 Eigen::RowVector4d sepVals = {  sepVertsPtr[0]->vals[f_id],
                                                 sepVertsPtr[1]->vals[f_id],
                                                 sepVertsPtr[2]->vals[f_id],
@@ -1758,7 +1758,7 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
                 Scalar next_ft_val = cell5_time_edge_value_diff(cell5Col[si+1], sc.baseVertsPtr, f_id);
                 if(sepVals.maxCoeff() * sepVals.minCoeff() < 0 /* &&  nonzeroCount >= 2  && nonzeroCount >= 1 */ )
                 {
-                    if (sc.cellDFunc0XIds.row(si)(f_id) != 0 || sc.cellDFunc0XIds.row(si+1)(f_id) != 0)
+                    // if (sc.cellDFunc0XIds.row(si)(f_id) != 0 || sc.cellDFunc0XIds.row(si+1)(f_id) != 0)
                     {
                         if(prev_ft_val * next_ft_val < 0 )
                         {
@@ -1944,68 +1944,68 @@ static void push_one_col_tl(mtet::TetId tid, PushOneColCtx& ctx, ThreadLocalCtx&
                 else 
                 if (20.0 * sc.longest_edge_length > threshold) 
                 {
-                    // std::vector<ContourTet> simple_tets;
-                    // if (prism_to_tetrahedra(contour, pi, simple_tets))
-                    // {
-                    //     for (const ContourTet& tet : simple_tets) 
-                    //     {
-                    //         for (int vi = 0; vi < 4; vi++) {
-                    //             const auto cur_pt = contour.get_vertex(tet[vi]);
-                    //             sc.polygonVerts[vi].coord = {cur_pt[0], cur_pt[1], cur_pt[2], cur_pt[3]};
-                    //             auto valGradListA = funcs[fid_a](sc.polygonVerts[vi].coord);
-                    //             auto valGradListB = funcs[fid_b](sc.polygonVerts[vi].coord);  // NOTE: original has fid_a here too
-                    //             sc.polygonVerts[vi].valGradList = {
-                    //                 valGradListA.first + valGradListB.first,
-                    //                 valGradListA.second + valGradListB.second};
-                    //         }
-                    //         if (refine3D(sc.polygonVerts, threshold )) {
-                    //             if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
-                    //             break;
-                    //         }
-                    //     }
-                    //     size_t contour_vn = contour.get_num_vertices();
-                    //     bool check_bot_cap_tet = false;
-                    //     bool check_top_cap_tet = false;
-                    //     for(size_t vi = 0; vi < contour_vn; ++vi)
-                    //     {
-                    //         const auto cur_pt = contour.get_vertex(vi);
-                    //         if(cur_pt[3] == 0)
-                    //         {
-                    //             check_bot_cap_tet = true;
-                    //         }  else if(cur_pt[3] == 1) {
-                    //             check_top_cap_tet = true;
-                    //         }
-                    //     }
-                    //     if(check_bot_cap_tet)
-                    //     {
-                    //         for (int vi = 0; vi < 4; vi++) {
-                    //             const auto cur_pt = sc.baseVertsPtr[vi]->vert4dList.front();
-                    //             sc.polygonVerts[vi].coord = cur_pt.coord;
-                    //             auto valAB = cur_pt.vals[fid_a] + cur_pt.vals[fid_b];
-                    //             auto gradAB = cur_pt.grads.row(fid_a) + cur_pt.grads.row(fid_b);
-                    //             sc.polygonVerts[vi].valGradList = {valAB, gradAB};
-                    //         }
-                    //         if (refine3D(sc.polygonVerts, threshold )) {
-                    //             if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
-                    //             break;
-                    //         }
-                    //     }
-                    //     if(check_top_cap_tet)
-                    //     {
-                    //         for (int vi = 0; vi < 4; vi++) {
-                    //             const auto cur_pt = sc.baseVertsPtr[vi]->vert4dList.back();
-                    //             sc.polygonVerts[vi].coord = cur_pt.coord;
-                    //             auto valAB = cur_pt.vals[fid_a] + cur_pt.vals[fid_b];
-                    //             auto gradAB = cur_pt.grads.row(fid_a) + cur_pt.grads.row(fid_b);
-                    //             sc.polygonVerts[vi].valGradList = {valAB, gradAB};
-                    //         }
-                    //         if (refine3D(sc.polygonVerts, threshold )) {
-                    //             if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
-                    //             break;
-                    //         }
-                    //     }
+                    std::vector<ContourTet> simple_tets;
+                    if (prism_to_tetrahedra(contour, pi, simple_tets))
+                    {
+                        for (const ContourTet& tet : simple_tets) 
+                        {
+                            for (int vi = 0; vi < 4; vi++) {
+                                const auto cur_pt = contour.get_vertex(tet[vi]);
+                                sc.polygonVerts[vi].coord = {cur_pt[0], cur_pt[1], cur_pt[2], cur_pt[3]};
+                                auto valGradListA = funcs[fid_a](sc.polygonVerts[vi].coord);
+                                auto valGradListB = funcs[fid_b](sc.polygonVerts[vi].coord); 
+                                sc.polygonVerts[vi].valGradList = {
+                                    valGradListA.first + valGradListB.first,
+                                    valGradListA.second + valGradListB.second};
+                            }
+                            if (refine3D(sc.polygonVerts, threshold )) {
+                                if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
+                                break;
+                            }
+                        }
+                        size_t contour_vn = contour.get_num_vertices();
+                        bool check_bot_cap_tet = false;
+                        bool check_top_cap_tet = false;
+                        for(size_t vi = 0; vi < contour_vn; ++vi)
+                        {
+                            const auto cur_pt = contour.get_vertex(vi);
+                            if(cur_pt[3] == 0)
+                            {
+                                check_bot_cap_tet = true;
+                            }  else if(cur_pt[3] == 1) {
+                                check_top_cap_tet = true;
+                            }
+                        }
+                        if(check_bot_cap_tet)
+                        {
+                            for (int vi = 0; vi < 4; vi++) {
+                                const auto cur_pt = sc.baseVertsPtr[vi]->vert4dList.front();
+                                sc.polygonVerts[vi].coord = cur_pt.coord;
+                                auto valAB = cur_pt.vals[fid_a] + cur_pt.vals[fid_b];
+                                auto gradAB = cur_pt.grads.row(fid_a) + cur_pt.grads.row(fid_b);
+                                sc.polygonVerts[vi].valGradList = {valAB, gradAB};
+                            }
+                            if (refine3D(sc.polygonVerts, threshold )) {
+                                if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
+                                break;
+                            }
+                        }
+                        if(check_top_cap_tet)
+                        {
+                            for (int vi = 0; vi < 4; vi++) {
+                                const auto cur_pt = sc.baseVertsPtr[vi]->vert4dList.back();
+                                sc.polygonVerts[vi].coord = cur_pt.coord;
+                                auto valAB = cur_pt.vals[fid_a] + cur_pt.vals[fid_b];
+                                auto gradAB = cur_pt.grads.row(fid_a) + cur_pt.grads.row(fid_b);
+                                sc.polygonVerts[vi].valGradList = {valAB, gradAB};
+                            }
+                            if (refine3D(sc.polygonVerts, threshold )) {
+                                if (try_push_space_tl()) { baseSub = true; space_pushed = true; }
+                                break;
+                            }
+                        }
 
-                    // } else 
+                    } else 
                     {
                         // save_column_contour_plys(
                         //     spatial_verts,

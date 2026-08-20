@@ -14,6 +14,7 @@
 #include <lagrange/mesh_cleanup/remove_isolated_vertices.h>
 #include <lagrange/utils/SmallVector.h>
 #include <lagrange/utils/invalid.h>
+#include <lagrange/compute_components.h>
 #include <lagrange/views.h>
 #include <sweep/logger.h>
 
@@ -1422,6 +1423,61 @@ lagrange::SurfaceMesh<Scalar, Index> compute_envelope_arrangement2(
     return sweep_arrangement;
 }
 
+
+template <typename Scalar, typename Index>
+void keep_largest_component(
+    lagrange::SurfaceMesh<Scalar, Index>& mesh)
+{
+    if (mesh.get_num_facets() == 0) {
+        return;
+    }
+
+    lagrange::ComponentOptions options;
+    options.connectivity_type =
+        lagrange::ComponentOptions::ConnectivityType::Edge;
+
+    const Index num_components =
+        lagrange::compute_components(mesh, options);
+
+    if (num_components <= 1) {
+        lagrange::remove_isolated_vertices(mesh);
+        return;
+    }
+
+    // Use the same helper style already used in your codebase.
+    auto component_id =
+        attribute_vector_view<Index>(
+            mesh,
+            options.output_attribute_name);
+
+    std::vector<Index> component_size(num_components, 0);
+
+    for (Index fid = 0; fid < mesh.get_num_facets(); ++fid) {
+        ++component_size[component_id[fid]];
+    }
+
+    const Index largest_component =
+        static_cast<Index>(
+            std::distance(
+                component_size.begin(),
+                std::max_element(
+                    component_size.begin(),
+                    component_size.end())));
+
+    std::vector<Index> facets_to_remove;
+    facets_to_remove.reserve(mesh.get_num_facets());
+
+    for (Index fid = 0; fid < mesh.get_num_facets(); ++fid) {
+        if (component_id[fid] != largest_component) {
+            facets_to_remove.push_back(fid);
+        }
+    }
+
+    mesh.remove_facets(facets_to_remove);
+
+    lagrange::remove_isolated_vertices(mesh);
+}
+
 template <typename Scalar, typename Index>
 lagrange::SurfaceMesh<Scalar, Index> extract_sweep_surface_from_arrangement2(
     lagrange::SurfaceMesh<Scalar, Index>& sweep_arrangement)
@@ -1660,6 +1716,8 @@ lagrange::SurfaceMesh<Scalar, Index> extract_sweep_surface_from_arrangement2(
     }
 
     lagrange::remove_isolated_vertices(sweep_surface);
+
+    // keep_largest_component(sweep_surface);
 
     return sweep_surface;
 }

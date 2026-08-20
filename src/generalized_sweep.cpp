@@ -537,9 +537,9 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
             // std::string mark_tets_dir = options.out_dir + "/marked_tets.bin";
             // save_column_mesh_binary(verts,simps, time, tetMarkTags, tetMarkActive4DtetIds, mark_tets_dir);
             std::string tet_dir = options.out_dir + "/active_tets.ply";
-            write_tets_to_ply(verts, active_simps, tet_dir);
+            // write_tets_to_ply(verts, active_simps, tet_dir);
             std::string mark_tet_dir = options.out_dir + "/marked_tets.ply";
-            write_tets_to_ply(verts, mark_simps, mark_tet_dir);
+            // write_tets_to_ply(verts, mark_simps, mark_tet_dir);
             auto refine_end = std::chrono::high_resolution_clock::now();
             logger().info("mark tet num : {}", mark_simps.size()/4);
             logger().info(

@@ -2,7 +2,7 @@
 
 This code implements the ACM SIGGRAPH ASIA 2026 paper: CSG Sweeps: Feature-aware sweep surfacing of deformable CSGs
 
-<img width="1600" alt="ball-rolling" src="https://github.com/user-attachments/assets/4751b437-091b-4626-976e-3c0a74132838" />
+<img width="1600" alt="bolt-rolling"  src="data/images/ball-rolling.png" />
 
 >Top: A wire-like ball rolls forward while offsetting, changing its genus from 41 to 29. Bottom: The time-colored sweep boundary and sharp creases (2nd row), in transparency (3rd row, creases hidden for clarity), and a cut-away view (bottom row).
 

@@ -93,8 +93,8 @@ It outputs the same set of meshes as `generalized_sweep`. Both `function_file` a
 are in YAML format.
 
 
-The CSG function file is a YAML file that defines a space-time function supported by the [space-time-functions](https://github.com/adobe-research/space-time-functions) library.
-Here is a simple function file that sweeps a ball along the X axis. Please see the [spec](https://github.com/adobe-research/space-time-functions/blob/main/doc/yaml_spec.md) for a complete set of supported transforms and shapes.
+The CSG tree function file is a YAML file that defines a space-time function supported by the [space-time-functions](https://github.com/qnzhou/space-time-functions) library.
+Here is a simple CSG tree function file that sweeps 3 ball along the X axis while self-rotating. Please see the [spec](https://github.com/qnzhou/space-time-functions/blob/main/doc/yaml_spec.md) for a complete set of supported transforms and shapes.
 
 ```yaml
 type: csg
@@ -177,8 +177,8 @@ The `GridSpec` struct defines the initial spatial grid used for sweep computatio
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `resolution` | `[int, int, int]` | `[4, 4, 4]` | Number of grid cells in the x, y, z directions. Higher resolution provides better initial sampling but increases computation time. |
-| `bbox_min` | `[float, float, float]` | `[-0.2, -0.2, -0.2]` | Minimum corner of the axis-aligned bounding box that encloses the sweep volume. |
-| `bbox_max` | `[float, float, float]` | `[1.2, 1.2, 1.2]` | Maximum corner of the axis-aligned bounding box that encloses the sweep volume. |
+| `bbox_min` | `[float, float, float]` | `[-1.5, -1.5, -1.5]` | Minimum corner of the axis-aligned bounding box that encloses the sweep volume. |
+| `bbox_max` | `[float, float, float]` | `[1.5, 1.5, 1.5]` | Maximum corner of the axis-aligned bounding box that encloses the sweep volume. |
 
 **Note:** The bounding box should be large enough to fully enclose the swept volume throughout the entire trajectory (t ∈ [0, 1]).
 
@@ -240,8 +240,8 @@ grid.bbox_max = {1.5, 1.5, 1.5};
 
 // Configure sweep options
 sweep::SweepOptions options;
-options.epsilon_env = 1e-3;
-options.epsilon_sil = 1e-3;
+options.epsilon_env = 1e-4;
+options.epsilon_sil = 1e-4;
 options.with_insideness_check = true;
 
 // Compute sweep
@@ -259,7 +259,7 @@ import sweep3d
 # Configure grid
 grid_spec = sweep3d.GridSpec()
 grid_spec.resolution = [4, 4, 4]
-grid_spec.bbox_min = [-0.5, -0.5, -0.5]
+grid_spec.bbox_min = [-1.5, -1.5, -1.5]
 grid_spec.bbox_max = [1.5, 1.5, 1.5]
 
 # Configure sweep options

@@ -536,9 +536,9 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
             // simps = active_simps;
             // std::string mark_tets_dir = options.out_dir + "/marked_tets.bin";
             // save_column_mesh_binary(verts,simps, time, tetMarkTags, tetMarkActive4DtetIds, mark_tets_dir);
-            std::string tet_dir = options.out_dir + "/active_tets.ply";
+            // std::string tet_dir = options.out_dir + "/active_tets.ply";
             // write_tets_to_ply(verts, active_simps, tet_dir);
-            std::string mark_tet_dir = options.out_dir + "/marked_tets.ply";
+            // std::string mark_tet_dir = options.out_dir + "/marked_tets.ply";
             // write_tets_to_ply(verts, mark_simps, mark_tet_dir);
             auto refine_end = std::chrono::high_resolution_clock::now();
             logger().info("mark tet num : {}", mark_simps.size()/4);
@@ -763,7 +763,8 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     logger().info(
                 "feature lines generation from cc envelop time: {} seconds",
                 std::chrono::duration<double>(feature_end - feature_start).count());
-    cell_complex::save_edges_to_ply<4>(
+    
+                cell_complex::save_edges_to_ply<4>(
     options.out_dir + "/feature_edges_from_ccEnvelop.ply",
     junction_edges,
     edges_labels,

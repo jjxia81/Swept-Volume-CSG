@@ -1,6 +1,6 @@
 # Lifted Surfacing of Generalized Sweep Volumes
 
-This code implements the ACM SIGGRAPH ASIA 2025 paper: Lifted Surfacing of Generalized Sweep Volumes
+This code implements the ACM SIGGRAPH ASIA 2026 paper: CSG Sweeps: Feature-aware sweep surfacing of deformable CSGs
 
 <img width="1600" alt="ball-rolling" src="https://github.com/user-attachments/assets/4751b437-091b-4626-976e-3c0a74132838" />
 
@@ -27,14 +27,14 @@ make
 The C++ library `libsweep` and the command line tool `generalized_sweep` will be generated in the
 build directory.
 
-### Python Bindings
+<!-- ### Python Bindings
 
 We also provide a Python binding for easy integration with Python workflows:
 
 ```bash
 # Install the Python package
 pip install sweep3d
-```
+``` -->
 
 ## Usage
 
@@ -55,8 +55,9 @@ The `generalized_sweep` function provides the most general API. It takes the fol
 and generates the following outputs:
 
 * Sweep surface (final output)
-* Sweep envelope
-* Envelope arrangement
+* Sweep features (final output)
+<!-- * Sweep envelope -->
+<!-- * Envelope arrangement -->
 
 In addition to the sweep surface, our code also provides the sweep envelope and envelope
 arrangement for advanced users. Please see our paper for their definitions.
@@ -227,33 +228,37 @@ The `SweepOptions` struct provides fine-grained control over the sweep computati
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `epsilon_env` | `double` | `5e-4` | Tolerance for envelope approximation. |
-| `epsilon_sil` | `double` | `5e-3` | Tolerance for silhouette set approximation. |
-| `max_split` | `int` | unlimited | Maximum number of splits allowed during grid refinement. |
+| `epsilon_env` | `double` | `1e-4` | Tolerance for envelope approximation. |
+| `epsilon_sil` | `double` | `1e-4` | Tolerance for silhouette set approximation. |
+<!-- | `max_split` | `int` | unlimited | Maximum number of splits allowed during grid refinement. | -->
+| `with_insideness_check` | `bool` | `true` | Whether to perform insideness checks during grid refinement. If true, the algorithm will stop refinement early once it detects a cell is inside the swept volume. |
 | `with_adaptive_refinement` | `bool` | `true` | Enable/disable adaptive grid refinement. |
 | `initial_time_samples` | `size_t` | `8` | Number of initial uniform time samples per spatial grid vertex. |
+| `min_time_edge_length` | `size_t` | `4` | The time distance between two neighboring time samples, the real float value should be min_time_edge_length/1024, as time range (0-1) mapped to (0, 1024) |
+
 
 ### Quality Control Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `min_tet_radius_ratio` | `double` | `1e-5` | Minimum acceptable tetrahedron in-radius to circum-radius ratio during grid refinement. Tets below this threshold will not be refined further. |
-| `min_tet_edge_length` | `double` | `2e-5` | Minimum acceptable tetrahedron edge length during grid refinement. Tets with longest edge below this threshold will not be refined further. |
+| `min_tet_edge_length` | `double` | `0.005` | Minimum acceptable tetrahedron edge length during grid refinement. Tets with longest edge below this threshold will not be refined further. |
 
 ### Surface Extraction Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `with_insideness_check` | `bool` | `true` | Whether to perform insideness checks during grid refinement. If true, the algorithm will stop refinement early once it detects a cell is inside the swept volume. |
+
 | `with_snapping` | `bool` | `true` | Whether to enable vertex snapping during isocontouring. Improves the quality of the extracted mesh. |
 | `volume_threshold` | `double` | `1e-5` | Minimum volume threshold for arrangement cell filtering. Cells below this volume will be merged into adjacent cells. |
 | `face_count_threshold` | `size_t` | `200` | Minimum face count threshold for arrangement cell filtering. Cells below this face count will be merged into adjacent cells. |
+| `use_mix_cell_complex` | `bool` | `false` | Whether to build a hybrid columns(4 cells) with the detected active separators in each 4D column|
 
-### Advanced Parameters
+<!-- ### Advanced Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `cyclic` | `bool` | `false` | Whether the trajectory is cyclic. ⚠️ This feature is experimental and not fully supported. |
+| `cyclic` | `bool` | `false` | Whether the trajectory is cyclic. ⚠️ This feature is experimental and not fully supported. | -->
 
 ## Configuration Examples
 
@@ -268,22 +273,21 @@ The following examples show how to configure both grid parameters and sweep opti
 // Configure grid
 sweep::GridSpec grid;
 grid.resolution = {8, 8, 8};
-grid.bbox_min = {-0.5, -0.5, -0.5};
+grid.bbox_min = {-1.5, -1.5, -1.5};
 grid.bbox_max = {1.5, 1.5, 1.5};
 
 // Configure sweep options
 sweep::SweepOptions options;
 options.epsilon_env = 1e-3;
 options.epsilon_sil = 1e-3;
-options.with_insideness_check = false;
-options.max_split = 1000000;
+options.with_insideness_check = true;
 
 // Compute sweep
 auto result = sweep::generalized_sweep(f, grid, options);
 ```
 
 </details>
-
+<!-- 
 <details>
 <summary><b>Python Example</b></summary>
 
@@ -307,7 +311,7 @@ options.max_split = 1000000
 result = sweep3d.generalized_sweep(my_function, grid_spec, options)
 ```
 
-</details>
+</details> -->
 
 <details>
 <summary><b>YAML Example</b></summary>

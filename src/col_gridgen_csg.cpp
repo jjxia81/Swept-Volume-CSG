@@ -2192,13 +2192,13 @@ bool gridRefineCSG(
     const double time_scale = calTimeGlobalScaleWithInitGridCSG(vertexMap) ;
     std::cout << " --- time scale : " << time_scale << std::endl;
     // init shared data 
-    std::string log_path = out_dir + "/run_log.txt";
-    std::ofstream log_file(log_path, std::ios::app);
-    auto file_log = [&](const std::string& msg) {
-        // std::cout << msg << std::endl;
-        if (log_file.is_open()) log_file << msg << std::endl;
-    };
-    file_log(" --- time scale : " + std::to_string(time_scale)); 
+    // std::string log_path = out_dir + "/run_log.txt";
+    // std::ofstream log_file(log_path, std::ios::app);
+    // auto file_log = [&](const std::string& msg) {
+    //     // std::cout << msg << std::endl;
+    //     if (log_file.is_open()) log_file << msg << std::endl;
+    // };
+    // file_log(" --- time scale : " + std::to_string(time_scale)); 
     colActiveMapPtr = &colActiveMap;
     markEf0GradTetMapPtr = &tetMarkMap; 
     // Queues
@@ -2275,16 +2275,14 @@ bool gridRefineCSG(
             valid_tet_count ++;
         }
     }
-    std::cout << " --------- temporal refine count :  "<< temporal_splits << std::endl;
-    std::cout << " --------- spatial refine count :  "<< spatial_splits << std::endl;
-    file_log(" --------- temporal refine count :  " + std::to_string(temporal_splits)); 
-    file_log(" --------- spatial refine count : " + std::to_string(spatial_splits)); 
-    log_file.close();
+   
+    // std::cout << " --------- temporal refine count :  "<< temporal_splits << std::endl;
+    // std::cout << " --------- spatial refine count :  "<< spatial_splits << std::endl;
     // std::cout << " --------- active_3d_tet_count "<< valid_tet_count << std::endl;
     // std::cout << " --------- 3d_tet_count "<<  << std::endl;
     sweep::logger().info(
-        "Total splits: {}  Spatial splits: {}  Minimum tet radius ratio: {}",
-        splits, spatial_splits, min_tet_ratio);
+        "Total splits: {} ; Temporal splits : {}; Spatial splits: {} ; Minimum tet radius ratio: {}",
+        splits,temporal_splits, spatial_splits, min_tet_ratio);
     return true;
 }
 
@@ -2314,18 +2312,8 @@ bool gridRefineCSGParallel(
     time_start_G = set_time_start;
     set_csg_val_func(csg_f);
     init5CGridCSG(initial_time_samples, grid, funcs, MAX_TIME, vertexMap);
-
-
-    std::string log_path = out_dir + "/run_log.txt";
-    std::ofstream log_file(log_path, std::ios::app);
-    auto file_log = [&](const std::string& msg) {
-        if (log_file.is_open()) log_file << msg << std::endl;
-    };
-
     const double time_scale = calTimeGlobalScaleWithInitGridCSG(vertexMap);
     std::cout << " --- time scale : " << time_scale << std::endl;
-
-    file_log(" --- time scale : " + std::to_string(time_scale)); 
 
     colActiveMapPtr = &colActiveMap;
     markEf0GradTetMapPtr = &tetMarkMap; 
@@ -2468,13 +2456,12 @@ bool gridRefineCSGParallel(
     for (auto& ele : colActiveMap) {
         if (ele.second) valid_tet_count++;
     }
-    std::cout << " --------- temporal refine count :  " << temporal_splits << std::endl;
-    std::cout << " --------- spatial refine count :  "  << spatial_splits << std::endl;
-    file_log(" --------- temporal refine count :  " + std::to_string(temporal_splits)); 
-    file_log(" --------- spatial refine count : " + std::to_string(spatial_splits)); 
-    log_file.close();
+    // std::cout << " --------- temporal refine count :  " << temporal_splits << std::endl;
+    // std::cout << " --------- spatial refine count :  "  << spatial_splits << std::endl;
+
     sweep::logger().info(
-        "Total splits: {}  Spatial splits: {}  Minimum tet radius ratio: {}",
-        splits, spatial_splits, min_tet_ratio);
+        "Total splits: {} ; Temporal splits : {}; Spatial splits: {} ; Minimum tet radius ratio: {}",
+        splits,temporal_splits, spatial_splits, min_tet_ratio);
+   
     return true;
 }

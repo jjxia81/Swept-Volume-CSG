@@ -469,8 +469,72 @@ void extraceFeatureLinesFromCC(cell_complex::CellComplex<4> &ccSelect,
                 junction_edges.size(), junction_edges.size());
 }
 
-SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs, 
-        CSGFunction csg_f, 
+
+
+const size_t MAX_CSG_LEAF_NODE_NUM = 256;
+sweep::CSGFunction make_csg_function(const stf::CSGTree<3>& tree)
+{
+    return [&tree](Eigen::RowVectorXd leaf_values)
+        -> std::pair<double, size_t>
+    {
+        // stack-allocated, automatic per-thread, zero overhead
+        double val_buf[MAX_CSG_LEAF_NODE_NUM];
+        int    idx_buf[MAX_CSG_LEAF_NODE_NUM];
+        assert(tree.get_eval_buffer_size() <= MAX_CSG_LEAF_NODE_NUM);
+        int winner = tree.winning_leaf_flat(
+            leaf_values.data(), val_buf, idx_buf);
+        return {leaf_values[winner], static_cast<size_t>(winner)};
+    };
+}
+
+
+using FuncType = std::function<std::pair<double, Eigen::RowVector4d>(Eigen::RowVector4d)> ;
+std::vector<FuncType> make_leaf_functions(stf::CSGTree<3>& tree)
+{
+    // auto leaf_funcs = tree.get_leaf_functions();
+    tree.bake_transforms();
+    // auto leaves = tree.get_leaves();
+  
+    std::vector<int> indices;
+    tree.visit_postorder([&](const stf::CSGTree<3>::NodeInfo& info) {
+        if (info.is_leaf()) {
+            indices.push_back(info.node_index);
+        }
+    });
+
+    std::vector<FuncType> funcs;
+    funcs.reserve(indices.size());
+
+    for (auto node_idx : indices)
+    {
+        funcs.push_back([node_idx, tree](Eigen::RowVector4d pt) -> std::pair<double, Eigen::RowVector4d>
+        {
+            std::array<double, 3> pos = {pt[0], pt[1], pt[2]};
+            double t = pt[3];
+            // auto pos_in = nodeFunc.transform
+            //     ? nodeFunc.transform->transform(pos, t)
+            //     : pos;
+
+            auto [v, grad] = tree.value_and_gradient_at(node_idx, pos, t);
+            
+
+            // double val = nodeFunc.function->value(pos_in, t);
+            // auto grad  = nodeFunc.function->gradient(pos_in, t);  // std::array<Scalar, 4>
+
+            Eigen::RowVector4d grad_eigen;
+            grad_eigen << grad[0], grad[1], grad[2], grad[3];
+
+            return {v, grad_eigen};
+        });
+    }
+
+    return funcs;
+}
+
+
+SweepResult generalized_sweep_csg(
+    // const std::vector<SpaceTimeFunction>& funcs, 
+        // CSGFunction csg_f, 
         stf::CSGTree<3>* csgTreePtr,
         GridSpec grid_spec, 
         SweepOptions options)
@@ -479,7 +543,10 @@ SweepResult generalized_sweep_csg(const std::vector<SpaceTimeFunction>& funcs,
     MIN_TIME = options.min_time_edge_length;
     MAX_CELL_INTERVALS = 4 * (MAX_TIME / MIN_TIME);
     log_config(grid_spec, options);
+    csgTreePtr->build_flat_plan();
     inputCSGTreePtr = csgTreePtr;
+    auto csg_f = make_csg_function(*csgTreePtr);
+    auto funcs = make_leaf_functions(*csgTreePtr);
     size_t tree_non_leaf_num = inputCSGTreePtr->get_num_nodes() - funcs.size();
     std::cout << " csg tree non leaf node number :" << tree_non_leaf_num << std::endl;
 
@@ -893,35 +960,9 @@ SweepResult generalized_sweep_from_config(
     if (!csgTreePtr) {
         throw std::runtime_error("Expected a CSG tree as input: " + function_file.string());
     }
-
     csgTreePtr->build_flat_plan();
-
-    auto leaf_funcs = csgTreePtr->get_leaf_functions();
-    std::vector<SpaceTimeFunction> funcs;
-    funcs.reserve(leaf_funcs.size());
-    for (auto* func : leaf_funcs) {
-        funcs.push_back([func](Eigen::RowVector4d pt) -> std::pair<double, Eigen::RowVector4d> {
-            std::array<double, 3> pos = {pt[0], pt[1], pt[2]};
-            double t = pt[3];
-            double val = func->value(pos, t);
-            auto grad = func->gradient(pos, t);
-            Eigen::RowVector4d grad_eigen;
-            grad_eigen << grad[0], grad[1], grad[2], grad[3];
-            return {val, grad_eigen};
-        });
-    }
-    
-    CSGFunction csg_f = [csgTreePtr](Eigen::RowVectorXd leaf_values) -> std::pair<double, size_t> {
-        int buf_size = csgTreePtr->get_eval_buffer_size();
-        std::vector<double> val_buf(buf_size);
-        std::vector<int> idx_buf(buf_size);
-        int winner = csgTreePtr->winning_leaf_flat(
-            leaf_values.data(), val_buf.data(), idx_buf.data());
-        return {leaf_values[winner], static_cast<size_t>(winner)};
-    };
-
     options.out_dir = out_dir;
-    return generalized_sweep_csg(funcs, csg_f, csgTreePtr, grid_spec, options);
+    return generalized_sweep_csg(csgTreePtr, grid_spec, options);
 }
 
 } // namespace sweep

@@ -1,12 +1,12 @@
-# Lifted Surfacing of Generalized Sweep Volumes
+# CSG Sweeps: Feature-aware sweep surfacing of deformable CSGs
 
 This code implements the ACM SIGGRAPH ASIA 2026 paper: CSG Sweeps: Feature-aware sweep surfacing of deformable CSGs
 
 <img width="1600" alt="bolt-rolling"  src="data/images/fig-cad.png" />
 
->Top: A wire-like ball rolls forward while offsetting, changing its genus from 41 to 29. Bottom: The time-colored sweep boundary and sharp creases (2nd row), in transparency (3rd row, creases hidden for clarity), and a cut-away view (bottom row).
+>A bolt-like CAD model moves along a half-circle trajectory. During the motion, it self-rotates about an axis through the midpoint of its height, perpendicular to its vertical height axis. Its cylindrical shaft gradually becomes thinner and shorter, forming a twisted, tapered swept solid with a hexagonal base.
 
-Given any sweep represented as a smooth time-varying implicit function satisfying a genericity assumption, this algorithm produces a watertight and intersection-free surface that faithfully approximates the geometric and topological features.
+Given any sweep represented as a smooth time-varying CSG tree function satisfying a genericity assumption, this algorithm produces a watertight and intersection-free surface that faithfully approximates the geometric and topological features.
 
 ## Build
 
@@ -68,67 +68,65 @@ Here is a simple example:
 #include <sweep/generalized_sweep.h>
 #include <lagrange/io/save_mesh.h> // For IO only
 
-// Define implicit space-time function
-// Sweeping a ball of radius `r` along the X axis by a distance `d`.
-sweep::SpaceTimeFunc f = [](EigenRowVector4d p) {
-    constexpr double r = 0.2;
-    constexpr double d = 0.5;
+// Define implicit csg tree function from a yaml file
+auto funPtr = stf::parse_space_time_function_from_file<3>(args.function_file);
+auto managed = dynamic_cast<stf::ManagedSpaceTimeFunction<3>*>(funPtr.get());
+auto csgTreePtr = dynamic_cast<stf::CSGTree<3>*>(managed->get_function());
 
-    double x = p[0];
-    double y = p[1];
-    double z = p[2];
-    double t = p[3];
-
-    double val = (x + d * t) * (x + d * t) + y * y + z * z - r * r;
-    Eigen::RowVector4d grad {
-        2 * (x + d * t),
-        2 * y,
-        2 * z,
-        2 * d * (x + d * t)
-    };
-    return {val, grad};
-};
-
-// Define an initial coarse grid
-sweep::GridSpec grid;
-grid.bbox_min = {-0.3, -0.3, -0.3};
-grid.bbox_max = {0.8, 0.8, 0.8};
-
+// Define an  grid and options
+sweep::GridSpec grid_spec;
+sweep::SweepOptions options;
+options.out_dir = output_path;
+...
 // Compute the sweep surface
-auto r = sweep::generalized_sweep(f, grid);
-lagrange::io::save_mesh("sweep_surface.obj", r.sweep_surface);
+auto result = sweep::generalized_sweep_csg(csgTreePtr, grid_spec, options);
+lagrange::io::save_mesh("sweep_surface.obj", result.sweep_surface);
 ```
 
 #### `generalized_sweep_from_config`
 
 The `generalized_sweep_from_config` function loads two configuration files:
-* `function_file` defines the space-time function
+* `function_file` defines the CSG tree function
 * `config_file` defines the initial grid spec and sweep parameters
 
 It outputs the same set of meshes as `generalized_sweep`. Both `function_file` and `config_file`
 are in YAML format.
 
 
-The function file is a YAML file that defines a space-time function supported by the [space-time-functions](https://github.com/adobe-research/space-time-functions) library.
+The CSG function file is a YAML file that defines a space-time function supported by the [space-time-functions](https://github.com/adobe-research/space-time-functions) library.
 Here is a simple function file that sweeps a ball along the X axis. Please see the [spec](https://github.com/adobe-research/space-time-functions/blob/main/doc/yaml_spec.md) for a complete set of supported transforms and shapes.
 
 ```yaml
-type: sweep
+type: csg
 dimension: 3
-
-# The base shape
-primitive:
-  type: ball
-  center: [0.0, 0.0, 0.0]
-  radius: 0.2
-  degree: 2
-
-# Sweeping trajectory
-transform:
-  type: polyline
-  points:
-  - [-0.5, 0.0, 0.0]
-  - [0.5, 0.0, 0.0]
+root:
+  op: intersection
+  transform:
+    type: compose
+    transforms:
+      - type: translation
+        vector: [-1.0, 0.0, 0.0]
+      - type: rotation
+        axis: [1.0, 0.0, 0.0]
+        angle: 60.0
+        center: [0.0, 0.0, 0.0]
+  left:
+    negate: false
+    type: ball
+    center: [-0.06643, 0.216329, -0.050121]
+    radius: 0.737501
+  right:
+    op: intersection
+    left:
+      negate: false
+      type: ball
+      center: [-0.099182, 0.125618, 0.201075]
+      radius: 0.735332
+    right:
+      negate: true
+      type: ball
+      center: [-0.131273, -0.14916, -0.236873]
+      radius: 0.301939
 ```
 
 The `config_file` is used to specify the initial grid and the sweep options. Here is an example:
@@ -140,10 +138,11 @@ grid:
   bbox_max: [1, 1, 1]
 
 parameters:
-  epsilon_env: 5e-4
-  epsilon_sil: 5e-4
-  with_snapping: false
+  epsilon_env: 0.0001
+  epsilon_sil: 0.0001
   with_insideness_check: true
+  with_adaptive_refinement: true
+   min_tet_edge_length: 0.005
 ```
 
 The parameters section will be used to construct the `sweep::SweepOptions`.
@@ -160,49 +159,12 @@ auto r = sweep::generalized_sweep_from_config(
 );
 lagrange::io::save_mesh("sweep_surface.obj", r.sweep_surface);
 ```
-
 Please see more config-files-based examples in the [example](example) folder.
 
 ### Python API
-
 ```python
-import numpy as np
-import sweep3d
-import lagrange # For IO only
-
-# Space-time function
-def my_space_time_function(point_4d):
-    """Space-time implicit function.
-    
-    :param point_4d: 4D point [x, y, z, t] where t ∈ [0, 1]
-    :type point_4d: numpy.ndarray
-    :return: Tuple of (value, gradient)
-    :rtype: tuple(float, numpy.ndarray)
-    """
-    x, y, z, t = point_4d
-    r = 0.2
-    d = 0.5
-    value = (x - t * d)**2 + y**2 + z**2 - r**2
-    gradient = np.array([2 * (x - t * d), 2 * y, 2 * z, -2 * d * (x - t * d)])
-    return (value, gradient)
-
-# Initial grid
-grid_spec = sweep3d.GridSpec()
-grid_spec.bbox_min = [-0.3, -0.3, -0.3]
-grid_spec.bbox_max = [0.8, 0.8, 0.8]
-
-# Compute sweep surface
-result = sweep3d.generalized_sweep(my_space_time_function, grid_spec)
-
-# Extract mesh data
-V = result.sweep_surface.vertices
-F = result.sweep_surface.facets
-print(f"#Vertices: {len(V)}, #Faces: {len(F)}")
-
-# Save mesh
-lagrange.io.save_mesh("out.msh", result.sweep_surface)
+To do
 ```
-
 Please see `help(sweep3d)` for more details.
 
 
@@ -272,7 +234,7 @@ The following examples show how to configure both grid parameters and sweep opti
 
 // Configure grid
 sweep::GridSpec grid;
-grid.resolution = {8, 8, 8};
+grid.resolution = {4, 4, 4};
 grid.bbox_min = {-1.5, -1.5, -1.5};
 grid.bbox_max = {1.5, 1.5, 1.5};
 
@@ -296,7 +258,7 @@ import sweep3d
 
 # Configure grid
 grid_spec = sweep3d.GridSpec()
-grid_spec.resolution = [8, 8, 8]
+grid_spec.resolution = [4, 4, 4]
 grid_spec.bbox_min = [-0.5, -0.5, -0.5]
 grid_spec.bbox_max = [1.5, 1.5, 1.5]
 
@@ -318,14 +280,14 @@ result = sweep3d.generalized_sweep(my_function, grid_spec, options)
 
 ```yaml
 grid:
-    resolution: [8, 8, 8]
+    resolution: [4, 4, 4]
     bbox_min: [-0.5, -0.5, -0.5]
     bbox_max: [1.5, 1.5, 1.5]
 
 parameters:
     epsilon_env: 1e-3
     epsilon_sil: 1e-3
-    with_insideness_check: false
+    with_insideness_check: true
     max_split: 1000000
 ```
 

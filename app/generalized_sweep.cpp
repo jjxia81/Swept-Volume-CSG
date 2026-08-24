@@ -57,79 +57,6 @@ void save_features(std::string_view filename, lagrange::SurfaceMesh<Scalar, Inde
     }
 }
 
-// sweep::CSGFunction make_csg_function(const stf::CSGTree<3>& tree)
-// {
-//     int buf_size = tree.get_eval_buffer_size();
-//     auto val_buf = std::make_shared<std::vector<double>>(buf_size);
-//     auto idx_buf = std::make_shared<std::vector<int>>(buf_size);
-
-//     return [&tree, val_buf, idx_buf](Eigen::RowVectorXd leaf_values)
-//         -> std::pair<double, size_t>
-//     {
-//         int winner = tree.winning_leaf_flat(
-//             leaf_values.data(), val_buf->data(), idx_buf->data());
-//         return {leaf_values[winner], static_cast<size_t>(winner)};
-//     };
-// }
-
-const size_t MAX_CSG_LEAF_NODE_NUM = 256;
-sweep::CSGFunction make_csg_function(const stf::CSGTree<3>& tree)
-{
-    return [&tree](Eigen::RowVectorXd leaf_values)
-        -> std::pair<double, size_t>
-    {
-        // stack-allocated, automatic per-thread, zero overhead
-        double val_buf[MAX_CSG_LEAF_NODE_NUM];
-        int    idx_buf[MAX_CSG_LEAF_NODE_NUM];
-        assert(tree.get_eval_buffer_size() <= MAX_CSG_LEAF_NODE_NUM);
-        int winner = tree.winning_leaf_flat(
-            leaf_values.data(), val_buf, idx_buf);
-        return {leaf_values[winner], static_cast<size_t>(winner)};
-    };
-}
-
-using FuncType = std::function<std::pair<double, Eigen::RowVector4d>(Eigen::RowVector4d)> ;
-std::vector<FuncType> make_leaf_functions(stf::CSGTree<3>& tree)
-{
-    // auto leaf_funcs = tree.get_leaf_functions();
-    tree.bake_transforms();
-    // auto leaves = tree.get_leaves();
-  
-    std::vector<int> indices;
-    tree.visit_postorder([&](const stf::CSGTree<3>::NodeInfo& info) {
-        if (info.is_leaf()) {
-            indices.push_back(info.node_index);
-        }
-    });
-
-    std::vector<FuncType> funcs;
-    funcs.reserve(indices.size());
-
-    for (auto node_idx : indices)
-    {
-        funcs.push_back([node_idx, tree](Eigen::RowVector4d pt) -> std::pair<double, Eigen::RowVector4d>
-        {
-            std::array<double, 3> pos = {pt[0], pt[1], pt[2]};
-            double t = pt[3];
-            // auto pos_in = nodeFunc.transform
-            //     ? nodeFunc.transform->transform(pos, t)
-            //     : pos;
-
-            auto [v, grad] = tree.value_and_gradient_at(node_idx, pos, t);
-            
-
-            // double val = nodeFunc.function->value(pos_in, t);
-            // auto grad  = nodeFunc.function->gradient(pos_in, t);  // std::array<Scalar, 4>
-
-            Eigen::RowVector4d grad_eigen;
-            grad_eigen << grad[0], grad[1], grad[2], grad[3];
-
-            return {v, grad_eigen};
-        });
-    }
-
-    return funcs;
-}
 
 void load_config(std::string config_file, sweep::GridSpec& grid_spec, sweep::SweepOptions& options)
 {
@@ -269,19 +196,12 @@ int main(int argc, const char* argv[])
     
     bool input_csg_funcs = false; 
 
-    std::vector<FuncType> funcs;
-    sweep::CSGFunction csg_f; 
+
     stf::ManagedSpaceTimeFunction<3>* managed; 
     std::unique_ptr<stf::SpaceTimeFunction<3>> funPtr;
     stf::CSGTree<3>* csgTreePtr = nullptr;
-
-    if(args.function_file == "")
-    {
-        args.function_file = "/home/jjxia/Documents/projects/Swept-Volume-CSG/data/csg/tet3d.yaml";
-    }
     
     if(args.function_file != "" ) {
-        
         if (std::filesystem::exists(args.function_file) &&
             std::filesystem::is_regular_file(args.function_file)) 
         {
@@ -296,26 +216,18 @@ int main(int argc, const char* argv[])
                 sweep::logger().info("The provided space-time function is not a CSG tree.");
                 throw std::runtime_error("Expected a CSG tree as input.");
             }
-            
             if(args.is_static_func)
             {
                 csgTreePtr->set_static_time(args.static_frame_time);
             }
-            
-            csgTreePtr->build_flat_plan();
-            if(!input_csg_funcs)
-            {
-                csg_f = make_csg_function(*csgTreePtr);
-                funcs = make_leaf_functions(*csgTreePtr);
-            }
-            
            
         }  else {
             sweep::logger().info("The input CSG function file does not exist. ");
+            return 0;
         }
     } else {
-        /// use hard coded models as default/testing purpose.
-        // implicit_sweep = [&](Eigen::RowVector4d data) { return flippingDonutFullTurn(data); };
+        sweep::logger().info("There is no input csg tree function file! Please try again!");
+        return 0;
     }
     
     if (!std::filesystem::exists(output_path)) {
@@ -357,40 +269,9 @@ int main(int argc, const char* argv[])
     
     options.epsilon_env *= max_bbox_len;
     options.epsilon_sil *= max_bbox_len;
-
     options.min_tet_edge_length *= max_bbox_len;
     
-    
-    if(input_csg_funcs)
-    {
-        // funcs.push_back(csgf::sphere3d_f1);
-        // funcs.push_back(csgf::sphere3d_f2);
-        // grid_spec.bbox_max = csgf::bbox_max;
-        // grid_spec.bbox_min = csgf::bbox_min;
-        // csg_f = csgf::csgf_sphere3d;
-
-        csg_f = csgfTet::csgf_tet;
-        funcs.push_back(csgfTet::tet_f1);
-        funcs.push_back(csgfTet::tet_f2);
-        funcs.push_back(csgfTet::tet_f3);
-        funcs.push_back(csgfTet::tet_f4);
-        // grid_spec.bbox_max = csgfTet::bbox_max;
-        // grid_spec.bbox_min = csgfTet::bbox_min;
-        // funcs.push_back(implicit_sweep);
-    } else {
-        // funcs.push_back(implicit_sweep);
-    }
-
-    if(funcs.empty())
-    {
-        sweep::logger().info("Warning: no csg leaf node functions.");
-        return 0;
-    }
-
-    // std::function<std::pair<double, size_t>(Eigen::RowVectorXd)> csg_f = csgf::csgf_sphere3d;  
-    // std::function<std::pair<double, size_t>(Eigen::RowVectorXd)> csg_f;
-
-    auto result = sweep::generalized_sweep_csg(funcs, csg_f, csgTreePtr, grid_spec, options);
+    auto result = sweep::generalized_sweep_csg(csgTreePtr, grid_spec, options);
     // auto& envelope = result.envelope;
     auto& sweep_surface = result.sweep_surface;
     // auto& sweep_arrangement = result.arrangement;
@@ -401,7 +282,7 @@ int main(int argc, const char* argv[])
     //                         .time_since_epoch()
     //                         .count();
     
-    lagrange::io::save_mesh(output_path + "/sweep_surface.obj", sweep_surface); 
+    // lagrange::io::save_mesh(output_path + "/sweep_surface.obj", sweep_surface); 
     // lagrange::io::save_mesh(output_path + "/envelope.msh", envelope);
     // lagrange::io::save_mesh(output_path + "/sweep_surface.msh", sweep_surface);
     // lagrange::io::save_mesh(output_path + "/arrangement.msh", sweep_arrangement);

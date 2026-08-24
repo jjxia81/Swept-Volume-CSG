@@ -162,8 +162,8 @@ struct SweepOptions {
 ///                  the arrangement mesh, and the final sweep surface.
 ///
 SweepResult generalized_sweep_csg(
-            const std::vector<SpaceTimeFunction>& funcs,
-                              CSGFunction csg_f,
+            // const std::vector<SpaceTimeFunction>& funcs,
+                            //   CSGFunction csg_f,
                               stf::CSGTree<3>* csgTreePtr,
                               GridSpec grid_spec = {},
                               SweepOptions options = {});

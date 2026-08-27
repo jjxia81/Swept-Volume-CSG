@@ -284,7 +284,7 @@ int main(int argc, const char* argv[])
     
     // lagrange::io::save_mesh(output_path + "/sweep_surface.obj", sweep_surface); 
     // lagrange::io::save_mesh(output_path + "/envelope.msh", envelope);
-    // lagrange::io::save_mesh(output_path + "/sweep_surface.msh", sweep_surface);
+    lagrange::io::save_mesh(output_path + "/sweep_surface.msh", sweep_surface);
     // lagrange::io::save_mesh(output_path + "/arrangement.msh", sweep_arrangement);
     // save_features(output_path + "/features.obj", sweep_arrangement);
     // lagrange::io::save_mesh(output_path + "/arrangement.msh", sweep_arrangement);

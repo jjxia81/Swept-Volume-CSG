@@ -600,13 +600,7 @@ SweepResult generalized_sweep_csg(
                     unmark_simps.push_back(simps[4*i + 3]);
                 }
             }
-            // simps = active_simps;
-            // std::string mark_tets_dir = options.out_dir + "/marked_tets.bin";
-            // save_column_mesh_binary(verts,simps, time, tetMarkTags, tetMarkActive4DtetIds, mark_tets_dir);
-            // std::string tet_dir = options.out_dir + "/active_tets.ply";
-            // write_tets_to_ply(verts, active_simps, tet_dir);
-            // std::string mark_tet_dir = options.out_dir + "/marked_tets.ply";
-            // write_tets_to_ply(verts, mark_simps, mark_tet_dir);
+            
             auto refine_end = std::chrono::high_resolution_clock::now();
             logger().info("mark tet num : {}", mark_simps.size()/4);
             logger().info(
@@ -650,49 +644,7 @@ SweepResult generalized_sweep_csg(
         timeStartIndices.push_back(timeEndIndex);
     }
 
-    // const double time_buffer_dist = 32.0 / 1024.0; 
-    // std::vector<double> predefined_time_samples = {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0};
-    // for(size_t i = 0; i < time.size(); ++i)
-    // {
-    //     for(auto tVal : predefined_time_samples)
-    //     {
-    //         timeSamples.push_back(tVal);
-    //     }
-    //     timeEndIndex += predefined_time_samples.size();
-    //     timeStartIndices.push_back(timeEndIndex);
-    //     // std::array<double, 3> pos = {verts[3*i], verts[3*i + 1], verts[3*i + 2]};
-    //     // double min_f_val = std::numeric_limits<double>::max();
-    //     // size_t min_index = 0;
-    //     // for(size_t j =0; j < time[i].size(); ++j)
-    //     // {
-    //     //     double current_f_val = csgTreePtr->value(pos, time[i][j]);
-    //     //     if(min_f_val > current_f_val)
-    //     //     {
-    //     //         min_index = j; 
-    //     //         min_f_val = current_f_val;
-    //     //     }
-    //     // }
-    //     // double cur_t_max = 1.0;
-    //     // double cur_t_min = 0.0;
-    //     // if(time[i][min_index] = cur_t_min)
-    //     // {
-    //     //     timeSamples.push_back(cur_t_min);
-    //     //     timeSamples.push_back(cur_t_min + time_buffer_dist);
-    //     //     timeEndIndex += 2;
-    //     // } else if(time[i][min_index] = cur_t_max)
-    //     // {
-    //     //     timeSamples.push_back(cur_t_max - time_buffer_dist);
-    //     //     timeSamples.push_back(cur_t_max);
-    //     //     timeEndIndex += 2;
-    //     // } else {
-    //     //     timeSamples.push_back(std::max(time[i][min_index] - time_buffer_dist, cur_t_min) );
-    //     //     timeSamples.push_back(time[i][min_index]);
-    //     //     timeSamples.push_back(std::min(time[i][min_index] + time_buffer_dist, cur_t_max));
-    //     //     timeEndIndex += 3;
-    //     // }
-    //     // // timeEndIndex += time[i].size();
-    //     // timeStartIndices.push_back(timeEndIndex);
-    // }
+    
 
     std::vector<size_t> active_pent_start_indices;
     active_pent_start_indices.push_back(0);
@@ -920,9 +872,9 @@ SweepResult generalized_sweep_csg(
     options.out_dir + "/sweep_feature_edges_labeled.ply",
     result.sweep_surface);
 
-    // save_labeled_edges_msh<Scalar, uint32_t>(
-    // options.out_dir + "/sweep_feature_edges_labeled.msh",
-    // result.sweep_surface);
+    save_labeled_edges_with_time_ply<Scalar, uint32_t>(
+    options.out_dir + "/sweep_feature_edges_labeled_time.ply",
+    result.sweep_surface);
 
     save_sweep_surface_ply<Scalar, uint32_t>(
     options.out_dir + "/sweep_surface_labeled.ply",

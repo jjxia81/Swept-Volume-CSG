@@ -2512,6 +2512,7 @@ void save_labeled_edges_msh(
     }
 
     // ------------------- $ElementData: edge_label -------------------
+
     {
         mshio::Data d;
         d.header.string_tags = {"edge_label"};
@@ -2528,6 +2529,8 @@ void save_labeled_edges_msh(
     // ------------------- Write -------------------
     mshio::save_msh(filename, spec);
 }
+
+
 template <typename Scalar, typename Index>
 lagrange::SurfaceMesh<Scalar, Index> remove_boundary_faces(
     const lagrange::SurfaceMesh<Scalar, Index>& mesh)
@@ -2738,6 +2741,246 @@ lagrange::SurfaceMesh<Scalar, Index> remove_boundary_faces(
     }
 
     return out;
+}
+
+
+template <typename Scalar, typename Index>
+void save_labeled_edges_with_time_ply(
+    const std::string& filename,
+    const lagrange::SurfaceMesh<Scalar, Index>& mesh,
+    const std::string& attr_name = "edge_label")
+{
+    if (!mesh.has_attribute(attr_name)) {
+        throw std::runtime_error(
+            "Mesh has no '" + attr_name + "' attribute");
+    }
+    if (!mesh.has_attribute("time_vertex")) {
+        throw std::runtime_error(
+            "Mesh has no 'time_vertex' attribute");
+    }
+    if (!mesh.has_attribute("time")) {
+        throw std::runtime_error(
+            "Mesh has no per-corner 'time' attribute");
+    }
+
+    auto V = lagrange::vertex_view(mesh);
+
+    auto labels =
+        lagrange::attribute_vector_view<int32_t>(
+            mesh,
+            attr_name);
+
+    auto time_vertex =
+        lagrange::attribute_vector_view<Scalar>(
+            mesh,
+            "time_vertex");
+
+    auto corner_time =
+        lagrange::attribute_vector_view<Scalar>(
+            mesh,
+            "time");
+
+    struct ExportVertex {
+        Index mesh_vertex;
+        Scalar time;
+    };
+
+    struct ExportEdge {
+        size_t vertex0;
+        size_t vertex1;
+        int32_t label;
+    };
+
+    std::vector<ExportVertex> export_vertices;
+    std::vector<ExportEdge> export_edges;
+
+    export_vertices.reserve(mesh.get_num_edges());
+    export_edges.reserve(mesh.get_num_edges() / 8);
+
+    // Labels 1/2/3 use time_vertex and can share output vertices.
+    ankerl::unordered_dense::map<Index, size_t>
+        regular_vertex_map;
+
+    auto register_regular_vertex =
+        [&](Index vi) -> size_t
+    {
+        auto it = regular_vertex_map.find(vi);
+        if (it != regular_vertex_map.end()) {
+            return it->second;
+        }
+
+        // PLY vertex indices are zero-based.
+        const size_t output_index =
+            export_vertices.size();
+
+        export_vertices.push_back({
+            vi,
+            time_vertex[vi]
+        });
+
+        regular_vertex_map.emplace(
+            vi,
+            output_index);
+
+        return output_index;
+    };
+
+    // Find the largest original corner time for each endpoint of
+    // a label-4 edge.
+    auto get_feature_edge_times =
+        [&](Index eid, Index v0, Index v1)
+            -> std::pair<Scalar, Scalar>
+    {
+        Scalar t0 =
+            std::numeric_limits<Scalar>::lowest();
+        Scalar t1 =
+            std::numeric_limits<Scalar>::lowest();
+
+        bool found0 = false;
+        bool found1 = false;
+
+        mesh.foreach_facet_around_edge(
+            eid,
+            [&](Index fid) {
+                const Index cb =
+                    mesh.get_facet_corner_begin(fid);
+
+                const Index ce =
+                    mesh.get_facet_corner_end(fid);
+
+                for (Index ci = cb; ci < ce; ++ci) {
+                    const Index vi =
+                        mesh.get_corner_vertex(ci);
+
+                    if (vi == v0) {
+                        t0 = std::max(
+                            t0,
+                            corner_time[ci]);
+                        found0 = true;
+                    }
+
+                    if (vi == v1) {
+                        t1 = std::max(
+                            t1,
+                            corner_time[ci]);
+                        found1 = true;
+                    }
+                }
+            });
+
+        if (!found0 || !found1) {
+            throw std::runtime_error(
+                "Missing corner time for feature edge " +
+                std::to_string(eid));
+        }
+
+        return {t0, t1};
+    };
+
+    // Construct output edges and their corresponding vertices.
+    for (Index eid = 0;
+         eid < mesh.get_num_edges();
+         ++eid) {
+        const int32_t label = labels[eid];
+
+        if (label == 0) {
+            continue;
+        }
+
+        auto [v0, v1] =
+            mesh.get_edge_vertices(eid);
+
+        size_t out_v0;
+        size_t out_v1;
+
+        if (label == 4) {
+            auto [t0, t1] =
+                get_feature_edge_times(
+                    eid,
+                    v0,
+                    v1);
+
+            // Label-4 endpoints are not shared because one mesh vertex
+            // may have different times on different feature edges.
+            out_v0 = export_vertices.size();
+            export_vertices.push_back({v0, t0});
+
+            out_v1 = export_vertices.size();
+            export_vertices.push_back({v1, t1});
+        } else {
+            out_v0 =
+                register_regular_vertex(v0);
+
+            out_v1 =
+                register_regular_vertex(v1);
+        }
+
+        export_edges.push_back({
+            out_v0,
+            out_v1,
+            label
+        });
+    }
+
+    if (export_edges.empty()) {
+        throw std::runtime_error(
+            "save_labeled_edges_with_time_ply: "
+            "no labeled edges found");
+    }
+
+    std::ofstream out(filename);
+
+    if (!out) {
+        throw std::runtime_error(
+            "Cannot open " + filename + " for writing");
+    }
+
+    // PLY header.
+    out << "ply\n";
+    out << "format ascii 1.0\n";
+    out << "comment labeled sweep edges with time\n";
+
+    out << "element vertex "
+        << export_vertices.size() << "\n";
+
+    out << "property float x\n";
+    out << "property float y\n";
+    out << "property float z\n";
+    out << "property float time\n";
+
+    out << "element edge "
+        << export_edges.size() << "\n";
+
+    out << "property int vertex1\n";
+    out << "property int vertex2\n";
+    out << "property int label\n";
+
+    out << "end_header\n";
+
+    // Vertices and time.
+    for (const auto& vertex : export_vertices) {
+        const Index vi = vertex.mesh_vertex;
+
+        out << V(vi, 0) << ' '
+            << V(vi, 1) << ' '
+            << V(vi, 2) << ' '
+            << static_cast<double>(vertex.time)
+            << '\n';
+    }
+
+    // Edges and labels.
+    for (const auto& edge : export_edges) {
+        out << edge.vertex0 << ' '
+            << edge.vertex1 << ' '
+            << edge.label << '\n';
+    }
+
+    out.flush();
+
+    if (!out) {
+        throw std::runtime_error(
+            "Failed writing " + filename);
+    }
 }
 
 #endif /* post_processing_h */

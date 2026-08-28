@@ -1,0 +1,21 @@
+version: 1.0.0
+grid:
+  resolution: [4, 4, 4]
+  bbox_min: [-4.0, -1.5, -1.5]
+  # bbox_max: [1.0, 1.0, 1.0]
+  bbox_max: [4.01, 1.51, 1.51]
+  # bbox_min: [0.7, -1.0, -0.52]
+  # bbox_max: [1.4, -0.5, 0.1]
+
+parameters:
+  epsilon_env: 0.0001
+  epsilon_sil: 0.0001
+  with_snapping: false
+  with_insideness_check: true
+  with_adaptive_refinement: true
+  initial_time_samples: 8
+  min_tet_edge_length: 0.0005
+  use_mix_cell_complex: false
+
+# vn 272,626
+# fn 545,410

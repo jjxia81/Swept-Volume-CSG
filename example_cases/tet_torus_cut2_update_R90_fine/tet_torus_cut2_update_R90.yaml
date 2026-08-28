@@ -1,0 +1,51 @@
+type: csg
+dimension: 3
+root:
+  op: intersection
+  left:
+    op: intersection
+    transform:
+      type: compose
+      transforms:
+        - type: translation
+          vector: [-0.4, 0, 0]
+        - type: rotation
+          axis: [1.0, 0.0, 0.0]
+          angle: 90.0
+          center: [0.35, 0.5, 0.5]
+    left:
+      op: intersection
+      left:
+        type: plane
+        point: [0.2, 0.5, 0.5]
+        normal: [1.0, -1.0, -1.0]
+      right:
+        type: plane
+        point: [0.2, 0.5, 0.5]
+        normal: [-1.0, 1.0, -1.0]
+    right:
+      op: intersection
+      left:
+        type: plane
+        point: [0.2, 0.5, 0.5]
+        normal: [-1.0, -1.0, 1.0]
+      right:
+        type: plane
+        point: [0.5, 0.5, 0.5]
+        normal: [1.0, 1.0, 1.0]
+  right:
+    type: torus
+    center: [0.7, 0.5, 0.5]
+    normal: [0.0, 1.0, 0.0]
+    major_radius: 0.2
+    minor_radius: 0.09
+    negate: true
+    transform:
+      type: compose
+      transforms:
+        - type: translation
+          vector: [0.4, 0, 0]
+        - type: rotation
+          axis: [1.0, 0.0, 0.0]
+          angle: -90
+          center: [0.7, 0.5, 0.5]

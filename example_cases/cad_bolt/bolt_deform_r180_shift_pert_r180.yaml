@@ -1,0 +1,111 @@
+type: csg
+dimension: 3
+root:
+  op: intersection
+  left:
+    op: union
+    transform:
+      type: compose
+      transforms:
+        - type: translation
+          vector: [0.0, 0.0, 0.0]
+        - type: rotation
+          axis: [0.019, 1.17, 0.013]
+          angle: 180.0
+          center: [0.0, 0.0, 1.0]
+        - type: rotation
+          axis: [1.019, 0.037, 0.053]
+          angle: 360.0
+          center: [0.2, 0.0, 0.0]
+    left:
+      op: intersection
+      left:
+        op: intersection
+        left:
+          type: plane
+          point: [0.0, 0.05, 0.0]
+          normal: [0.00011, 1.0, -0.00013]
+        right:
+          op: intersection
+          left:
+            type: plane
+            point: [0.0, 0.0, 0.2]
+            normal: [0.00011, -0.00013, 1.0]
+          right:
+            type: plane
+            point: [0.0, 0.0, -0.2]
+            normal: [0.00013, -0.00011, -1.0]
+      right:
+        op: intersection
+        left:
+          op: intersection
+          left:
+            type: plane
+            point: [-0.173205, 0.00011, -0.1]
+            normal: [-0.173315, 0.0013, -0.1]
+          right:
+            type: plane
+            point: [0.173205, 0.00017, 0.1]
+            normal: [0.1735305, 0.00015, 0.1]
+        right:
+          op: intersection
+          left:
+            type: plane
+            point: [0.173205, 0.00019, -0.1]
+            normal: [0.1734305, 0.00011, -0.1]
+          right:
+            type: plane
+            point: [-0.173205, 0.000103, 0.1]
+            normal: [-0.1735705, 0.00021, 0.1]
+    right:
+      type: offset
+      base_function:
+        type: sweep
+        primitive:
+          type: capsule
+          negate: false
+          radius: 0.1
+          start: [0.0, -0.3, 0.0]
+          end: [0.0, 0.7, 0.0]
+        transform:
+          type: compose
+          transforms:
+            - type: translation
+              vector: [0.0, 0.0, 0.0]
+            - type: rotation
+              axis: [0.019, 1.17, 0.013]
+              angle: 0.0
+              center: [0.0, 0.0, 1.0]
+      offset_function:
+        type: linear
+        slope: 0.04
+        intercept: 0.0   
+  right:
+    op: intersection
+    transform:
+      type: compose
+      transforms:
+        - type: translation
+          vector: [0.0, 0.0, 0.0]
+        - type: rotation
+          axis: [0.019, 1.17, 0.013]
+          angle: 180.0
+          center: [0.0, 0.0, 1.0]
+        - type: rotation
+          axis: [1.019, 0.037, 0.053]
+          angle: 360.0
+          center: [0.2, 0.0, 0.0]
+    left:
+      type: plane
+      point: [0.0, -0.05, 0.0]
+      normal: [-0.00013, -1.0, 0.00017]
+    right:
+      type: plane
+      point: [0.0, 0.6, 0.0]
+      normal: [0.00013, 1.0, 0.00023]
+      transform:
+        type: translation
+        vector: [0.0, 0.4, 0.0]
+              
+        
+    

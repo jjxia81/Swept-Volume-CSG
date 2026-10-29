@@ -40,7 +40,7 @@ pip install sweep3d
 
 ### Paper Examples
 
-To run Examples in the paper, please go to folder 'example_cases' and check the 'run_example.py' for details
+To run Examples in the paper, please go to folder 'example_cases' and check the [run_example.py](example_cases/run_example.py) for details
 
 ### C++ API
 

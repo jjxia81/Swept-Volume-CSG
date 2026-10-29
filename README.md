@@ -38,6 +38,10 @@ pip install sweep3d
 
 ## Usage
 
+### Paper Examples
+
+To run Examples in the paper, please go to folder 'example_cases' and check the 'run_example.py' for details
+
 ### C++ API
 
 The C++ API consists of two simple functions, `generalized_sweep` and

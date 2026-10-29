@@ -1,0 +1,3 @@
+--Total sample number 2123879
+3D grid tet Number:  684344 3D active Tet Number: 335745
+4D Vertex Number:  2123879 4D Tetrahedra Number: 42814464
